@@ -6,6 +6,7 @@ import argparse
 import csv
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import gzip
 import hashlib
 import html.parser
 import io
@@ -343,8 +344,11 @@ def run_muse(config, session, root, records, sources_path, logger) -> None:
     page.raise_for_status()
     for filename in settings["files"]:
         url = urljoin(settings["base_url"], filename)
-        license_text = "Dictionary-file terms are not stated at the download endpoint; MUSE data reportedly non-commercial (verify with source owner)."
-        download_file(session, url, root / "muse" / filename, "muse", "MUSE ground-truth bilingual dictionary; version not stated at download endpoint", license_text, config, root.parent.parent, records, sources_path, logger)
+        license_text = "Attribution-NonCommercial 4.0 International (https://github.com/facebookresearch/MUSE/blob/main/LICENSE)"
+        record = download_file(session, url, root / "muse" / filename, "muse", "MUSE ground-truth bilingual dictionary; version not stated at download endpoint", license_text, config, root.parent.parent, records, sources_path, logger)
+        if record.license != license_text:
+            records[record.file] = SourceRecord(record.source, record.file, record.url, record.retrieved_utc, record.bytes, record.sha256, record.version, license_text)
+            write_sources(sources_path, records.values())
 
 
 def run_unihan(config, session, root, records, sources_path, logger) -> None:
@@ -409,7 +413,22 @@ def run_unihan(config, session, root, records, sources_path, logger) -> None:
 def run_cedict(config, session, root, records, sources_path, logger) -> None:
     settings = config["downloads"]["cedict"]
     target = root / "cedict" / Path(settings["url"]).name
-    download_file(session, settings["url"], target, "cedict", "CC-CEDICT latest non-verified release", "Creative Commons Attribution-ShareAlike 4.0 International License", config, root.parent.parent, records, sources_path, logger)
+    rel = target.resolve().relative_to(root.parent.parent.resolve()).as_posix()
+    record = download_file(session, settings["url"], target, "cedict", "CC-CEDICT release date from the file header", "Creative Commons Attribution-ShareAlike 4.0 International License", config, root.parent.parent, records, sources_path, logger)
+    release_date = None
+    with gzip.open(target, "rt", encoding="utf-8", newline="") as handle:
+        for line in handle:
+            if line.startswith("#! date="):
+                release_date = line.removeprefix("#! date=").strip()
+                break
+            if not line.startswith("#"):
+                break
+    if not release_date:
+        raise SourceError(f"CC-CEDICT header has no #! date= release line: {target}")
+    version = f"CC-CEDICT release date {release_date} (header #! date={release_date})"
+    if record.version != version:
+        records[rel] = SourceRecord(record.source, record.file, record.url, record.retrieved_utc, record.bytes, record.sha256, version, record.license)
+        write_sources(sources_path, records.values())
 
 
 def run_brysbaert(config, session, root, records, sources_path, logger) -> None:

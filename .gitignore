@@ -8,6 +8,7 @@ data/interim/logs/*
 !data/interim/logs/.gitkeep
 
 # Python and local tooling.
+keys/
 __pycache__/
 *.py[cod]
 .pytest_cache/

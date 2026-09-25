@@ -90,10 +90,10 @@ downloads:
 models:
   gemma:
     hf_id: google/gemma-3-4b-it
-    revision: TODO  # TODO: pin a tested model revision.
+    revision: 093f9f388b31de276ce2de164bdc2081324b9767
   qwen:
     hf_id: Qwen/Qwen3-4B
-    revision: TODO  # TODO: pin a tested model revision.
+    revision: 1cfa9a7208912126459214e8b04321603b3df60c
   llama:
     hf_id: meta-llama/Llama-3.2-3B-Instruct
-    revision: TODO  # TODO: pin a tested model revision.
+    revision: 0cb88a4f764b7a12671c53f0838cd831a0843b95
