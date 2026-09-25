@@ -1,0 +1,211 @@
+"""Shared, deterministic helpers for the data-building pipeline."""
+
+from __future__ import annotations
+
+import json
+import logging
+import sys
+import unicodedata
+from collections.abc import Iterable, Iterator, Mapping
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+
+class DataConfigError(ValueError):
+    """Raised when a pipeline configuration cannot be loaded."""
+
+
+def _unique_mapping(pairs: Iterable[tuple[Any, Any]]) -> dict[Any, Any]:
+    """Build an NFC-normalized mapping without silently overwriting keys."""
+
+    result: dict[Any, Any] = {}
+    for key, value in pairs:
+        key = normalize_nfc(key) if isinstance(key, str) else key
+        if key in result:
+            raise ValueError(f"Duplicate mapping key after NFC normalization: {key!r}")
+        result[key] = value
+    return result
+
+
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """Safe YAML loader that also rejects duplicate or NFC-colliding keys."""
+
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict:
+        self.flatten_mapping(node)
+        return _unique_mapping(
+            (self.construct_object(key, deep=deep), self.construct_object(value, deep=deep))
+            for key, value in node.value
+        )
+
+
+def normalize_nfc(value: str) -> str:
+    """Return *value* normalized to Unicode NFC."""
+
+    if not isinstance(value, str):
+        raise TypeError(f"normalize_nfc expects str, got {type(value).__name__}")
+    return unicodedata.normalize("NFC", value)
+
+
+def normalize_strings(value: Any) -> Any:
+    """Recursively normalize every string in a JSON/YAML-compatible value."""
+
+    if isinstance(value, str):
+        return normalize_nfc(value)
+    if isinstance(value, Mapping):
+        return _unique_mapping(
+            (key, normalize_strings(item)) for key, item in value.items()
+        )
+    if isinstance(value, list):
+        return [normalize_strings(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(normalize_strings(item) for item in value)
+    return value
+
+
+def load_config(path: str | Path) -> dict[str, Any]:
+    """Load a YAML mapping and normalize all strings to Unicode NFC."""
+
+    config_path = Path(path)
+    try:
+        with config_path.open("r", encoding="utf-8", newline="") as handle:
+            loaded = yaml.load(handle, Loader=_UniqueKeyLoader)
+    except OSError as exc:
+        raise DataConfigError(f"Could not read config {config_path}: {exc}") from exc
+    except (yaml.YAMLError, ValueError, TypeError) as exc:
+        raise DataConfigError(f"Invalid YAML in config {config_path}: {exc}") from exc
+
+    if not isinstance(loaded, dict):
+        raise DataConfigError(f"Config {config_path} must contain a top-level mapping")
+    return normalize_strings(loaded)
+
+
+def iter_jsonl(path: str | Path) -> Iterator[Any]:
+    """Stream NFC-normalized JSONL; stop with a diagnostic on malformed input."""
+
+    jsonl_path = Path(path)
+    try:
+        handle = jsonl_path.open("rb")
+    except OSError as exc:
+        raise OSError(f"Could not read JSONL file {jsonl_path}: {exc}") from exc
+
+    with handle:
+        # Read bytes so invalid UTF-8 can be attributed to the exact record.
+        for line_number, line in enumerate(handle, start=1):
+            try:
+                record = json.loads(
+                    line.decode("utf-8"),
+                    object_pairs_hook=_unique_mapping,
+                    parse_constant=_reject_json_constant,
+                )
+                record = normalize_strings(record)
+            except (ValueError, TypeError) as exc:
+                raise ValueError(
+                    f"Invalid JSON in {jsonl_path} at line {line_number}: {exc}"
+                ) from exc
+            yield record
+
+
+def _reject_json_constant(value: str) -> Any:
+    """Reject the non-standard NaN/Infinity values accepted by json.loads."""
+
+    raise ValueError(f"Non-standard JSON constant: {value}")
+
+
+# Explicit alias for callers that prefer the "stream" naming.
+stream_jsonl = iter_jsonl
+
+
+class DropflowLogger:
+    """Append one deterministic record per stage; audit history grows on reruns."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def record(
+        self,
+        *,
+        step: str,
+        stage: str,
+        n_in: int,
+        n_out: int,
+        n_out_by_pos: Mapping[str, int],
+    ) -> None:
+        counts = normalize_strings(dict(n_out_by_pos))
+        if any(not isinstance(key, str) for key in counts):
+            raise ValueError("n_out_by_pos keys must be POS strings")
+        if any(type(value) is not int or value < 0 for value in (n_in, n_out, *counts.values())):
+            raise ValueError("Dropflow counts must be non-negative integers")
+        if n_out > n_in:
+            raise ValueError("Dropflow n_out cannot exceed n_in for a filter stage")
+        if sum(counts.values()) != n_out:
+            raise ValueError("Dropflow n_out_by_pos counts must sum to n_out")
+        payload = {
+            "step": normalize_nfc(step),
+            "stage": normalize_nfc(stage),
+            "n_in": n_in,
+            "n_out": n_out,
+            "n_out_by_pos": counts,
+        }
+        with self.path.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+            handle.write("\n")
+
+
+def log_dropflow(
+    path: str | Path,
+    *,
+    step: str,
+    stage: str,
+    n_in: int,
+    n_out: int,
+    n_out_by_pos: Mapping[str, int],
+) -> None:
+    """Append one dropflow record; convenient functional API."""
+
+    DropflowLogger(path).record(
+        step=step,
+        stage=stage,
+        n_in=n_in,
+        n_out=n_out,
+        n_out_by_pos=n_out_by_pos,
+    )
+
+
+def setup_logging(
+    step_name: str,
+    log_dir: str | Path,
+    *,
+    level: int | str = logging.INFO,
+) -> logging.Logger:
+    """Log to stdout and a per-run file, without nondeterministic timestamps.
+
+    Call once at step startup. Reconfiguration closes old handlers and replaces
+    the log file, so identical runs produce identical log bytes.
+    """
+
+    normalized_step = normalize_nfc(step_name)
+    if not normalized_step or Path(normalized_step).name != normalized_step:
+        raise ValueError("step_name must be a non-empty filename stem")
+    output_dir = Path(log_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    log_path = output_dir / f"{normalized_step}.log"
+
+    logger = logging.getLogger(normalized_step)
+    logger.setLevel(level)
+    logger.propagate = False
+
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        handler.close()
+
+    formatter = logging.Formatter("%(levelname)s %(message)s")
+    file_handler = logging.FileHandler(log_path, mode="w", encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
+    return logger

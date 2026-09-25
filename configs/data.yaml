@@ -1,0 +1,56 @@
+seed: 20260925
+
+langs:
+  - vi
+  - en
+  - zh
+  - fr
+  - id
+
+paths:
+  raw: data/raw
+  interim: data/interim
+  out: data/
+  build: data/build
+  prompts: data/prompts
+  tests: tests
+  logs: data/interim/logs
+  dropflow: data/interim/dropflow.jsonl
+
+logging:
+  level: INFO
+
+chinese:
+  code_field: TODO  # TODO: set the source field containing the Chinese language code.
+  simplified_only: true
+
+heldout:
+  fewshot_n: 30
+  directions_n: 200
+  stratify_by: pos
+
+filters:
+  min_sources: 2
+  polysemy_percentile: 50
+  surface_edit_threshold: 0.30
+  surface_compare_langs:
+    - en
+    - fr
+    - id
+
+nllb:
+  model: facebook/nllb-200-distilled-600M
+  num_beams: 5
+  num_return: 5
+  batch_size: 64
+
+models:
+  gemma:
+    hf_id: google/gemma-3-4b-it
+    revision: TODO  # TODO: pin a tested model revision.
+  qwen:
+    hf_id: Qwen/Qwen3-4B
+    revision: TODO  # TODO: pin a tested model revision.
+  llama:
+    hf_id: meta-llama/Llama-3.2-3B-Instruct
+    revision: TODO  # TODO: pin a tested model revision.

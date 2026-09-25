@@ -1,0 +1,17 @@
+[project]
+name = "vilens"
+version = "0.1.0"
+description = "Deterministic multilingual data-building pipeline"
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml>=6.0,<7.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0,<9.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

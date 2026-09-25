@@ -1,0 +1,14 @@
+# Large source downloads and generated intermediate artifacts.
+data/raw/*
+!data/raw/.gitkeep
+data/interim/*
+!data/interim/.gitkeep
+!data/interim/logs/
+data/interim/logs/*
+!data/interim/logs/.gitkeep
+
+# Python and local tooling.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
