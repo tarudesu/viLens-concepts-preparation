@@ -528,11 +528,11 @@ def run(config_path: str) -> dict[str, Any]:
     dropflow_path = Path(paths["dropflow"])
     _without_step_dropflow(dropflow_path, STEP)
     dropflow = DropflowLogger(dropflow_path)
-    dropflow.record(step=STEP, stage="raw_groups_pos_filtered", n_in=n_en_entries,
+    dropflow.record(step=STEP, stage="raw_groups_pos_filtered", unit="entries", n_in=n_en_entries,
                     n_out=n_eligible_entries, n_out_by_pos=dict(sorted(eligible_by_pos.items())))
-    dropflow.record(step=STEP, stage="five_way", n_in=eligible_groups,
+    dropflow.record(step=STEP, stage="five_way", unit="groups", n_in=eligible_groups,
                     n_out=len(five_way), n_out_by_pos=dict(sorted(five_way_by_pos.items())))
-    dropflow.record(step=STEP, stage="filter6_missing_vi_entry", n_in=len(five_way),
+    dropflow.record(step=STEP, stage="filter6_missing_vi_entry", unit="concepts", n_in=len(five_way),
                     n_out=len(rows), n_out_by_pos=dict(sorted(final_by_pos.items())))
 
     schema = _schema()

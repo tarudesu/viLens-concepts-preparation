@@ -1,0 +1,3 @@
+{"n_in":10,"n_out":8,"n_out_by_pos":{"noun":8},"stage":"raw_groups_pos_filtered","step":"03_pool"}
+{"n_in":5,"n_out":4,"n_out_by_pos":{"noun":4},"stage":"five_way","step":"03_pool"}
+{"n_in":4,"n_out":3,"n_out_by_pos":{"noun":3},"stage":"filter6_missing_vi_entry","step":"03_pool"}

@@ -1,0 +1,15 @@
+{
+  "head": {"vars": ["enLemma", "viLabel"]},
+  "results": {
+    "bindings": [
+      {
+        "enLemma": {"type": "literal", "xml:lang": "en", "value": "Car"},
+        "viLabel": {"type": "literal", "xml:lang": "vi", "value": "Ô tô"}
+      },
+      {
+        "enLemma": {"type": "literal", "xml:lang": "en", "value": "café"},
+        "viLabel": {"type": "literal", "xml:lang": "vi", "value": "quán cà phê"}
+      }
+    ]
+  }
+}

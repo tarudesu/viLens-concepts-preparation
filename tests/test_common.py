@@ -158,6 +158,7 @@ def test_dropflow_logger_writes_deterministic_json(tmp_path: Path) -> None:
     DropflowLogger(path).record(
         step="01",
         stage="sources",
+        unit="items",
         n_in=3,
         n_out=2,
         n_out_by_pos={"verb": 1, "noun": 1},
@@ -168,14 +169,15 @@ def test_dropflow_logger_writes_deterministic_json(tmp_path: Path) -> None:
         "n_out_by_pos": {"noun": 1, "verb": 1},
         "stage": "sources",
         "step": "01",
+        "unit": "items",
     }
 
 
 def test_dropflow_appends_byte_identical_records(tmp_path: Path) -> None:
     path = tmp_path / "interim" / "dropflow.jsonl"
-    log_dropflow(path, step="02", stage="e\u0301", n_in=3, n_out=2, n_out_by_pos={"verb": 1, "e\u0301": 1})
+    log_dropflow(path, step="02", stage="e\u0301", unit="groups", n_in=3, n_out=2, n_out_by_pos={"verb": 1, "e\u0301": 1})
     first = path.read_bytes()
-    log_dropflow(path, step="02", stage="é", n_in=3, n_out=2, n_out_by_pos={"é": 1, "verb": 1})
+    log_dropflow(path, step="02", stage="é", unit="groups", n_in=3, n_out=2, n_out_by_pos={"é": 1, "verb": 1})
     assert path.read_bytes() == first + first
     assert json.loads(first)["stage"] == "é"
 
@@ -187,7 +189,7 @@ def test_dropflow_appends_byte_identical_records(tmp_path: Path) -> None:
 def test_dropflow_rejects_inconsistent_counts(tmp_path: Path, n_in, n_out, by_pos) -> None:
     path = tmp_path / "dropflow.jsonl"
     with pytest.raises(ValueError):
-        log_dropflow(path, step="02", stage="bad", n_in=n_in, n_out=n_out, n_out_by_pos=by_pos)
+        log_dropflow(path, step="02", stage="bad", unit="concepts", n_in=n_in, n_out=n_out, n_out_by_pos=by_pos)
     assert not path.exists()
 
 

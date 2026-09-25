@@ -18,6 +18,17 @@ paths:
   dropflow: data/interim/dropflow.jsonl
   sources: data/build/SOURCES.md
 
+attest:
+  report_sample_n: 10
+  syllable_bins: [1, 2] # 1, 2, and 3+ whitespace-separated Vietnamese syllables
+  paths:
+    pool: data/interim/03_pool.parquet
+    output: data/interim/04_attested.parquet
+    vietnamese_dump: data/raw/wiktextract_vi/kaikki.org-dictionary-Vietnamese.jsonl
+    muse_vi_en: data/raw/muse/vi-en.txt
+    muse_en_vi: data/raw/muse/en-vi.txt
+    wikidata_cache: data/raw/wikidata_cache
+
 logging:
   level: INFO
 
@@ -40,6 +51,7 @@ heldout:
 
 filters:
   min_sources: 2
+  attestation_sources: [wiktextract_table, vi_gloss, muse, wikidata]
   polysemy_percentile: 50
   surface_edit_threshold: 0.30
   surface_compare_langs:
@@ -56,6 +68,21 @@ nllb:
   test_input: máy tính
   test_source_lang: vie_Latn
   test_target_lang: eng_Latn
+
+wikidata:
+  enabled: true
+  backend: api # api or sparql
+  endpoint: https://query.wikidata.org/sparql
+  batch_size: 200
+  api_endpoint: https://www.wikidata.org/w/api.php
+  api_search_limit: 10
+  entity_batch_size: 50
+  connectivity_timeout_seconds: 20
+  min_interval_seconds: 1.0
+  timeout_seconds: 60
+  max_retries: 5
+  retry_backoff_seconds: 2.0
+  user_agent: "viLens-research-data-pipeline/0.1 (Wikidata attestation; contact: luannt@uit.edu.vn)"
 
 downloads:
   min_free_bytes: 60000000000

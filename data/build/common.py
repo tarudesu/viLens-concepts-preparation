@@ -129,10 +129,14 @@ class DropflowLogger:
         *,
         step: str,
         stage: str,
+        unit: str,
         n_in: int,
         n_out: int,
         n_out_by_pos: Mapping[str, int],
     ) -> None:
+        normalized_unit = normalize_nfc(unit)
+        if normalized_unit not in {"entries", "groups", "concepts", "items"}:
+            raise ValueError(f"Dropflow unit must be entries/groups/concepts/items, got {unit!r}")
         counts = normalize_strings(dict(n_out_by_pos))
         if any(not isinstance(key, str) for key in counts):
             raise ValueError("n_out_by_pos keys must be POS strings")
@@ -145,6 +149,7 @@ class DropflowLogger:
         payload = {
             "step": normalize_nfc(step),
             "stage": normalize_nfc(stage),
+            "unit": normalized_unit,
             "n_in": n_in,
             "n_out": n_out,
             "n_out_by_pos": counts,
@@ -159,6 +164,7 @@ def log_dropflow(
     *,
     step: str,
     stage: str,
+    unit: str,
     n_in: int,
     n_out: int,
     n_out_by_pos: Mapping[str, int],
@@ -168,6 +174,7 @@ def log_dropflow(
     DropflowLogger(path).record(
         step=step,
         stage=stage,
+        unit=unit,
         n_in=n_in,
         n_out=n_out,
         n_out_by_pos=n_out_by_pos,
