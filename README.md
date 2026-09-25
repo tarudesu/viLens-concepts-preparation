@@ -1,16 +1,16 @@
 # viLens data pipeline
 
-Use the existing `sb` environment. From the repository root, install the locked
-dependencies into that environment and run the scaffold and tests:
+Use the existing `sb` environment. Activate it, then install the locked
+dependencies into that environment and run the pipeline through `uv`:
 
 ```sh
-UV_PROJECT_ENVIRONMENT="$(python -c 'import sys; print(sys.prefix)')" uv sync --locked --inexact
-make all
-make test
+uv sync --active --locked --inexact
+uv run --active --no-sync python data/build/00_scaffold.py --config configs/data.yaml
+uv run --active --no-sync pytest
 ```
 
-The `python` on PATH must belong to `sb`; the first command uses that interpreter's
-environment. `--inexact` preserves unrelated packages already installed there.
+`--inexact` preserves unrelated packages already installed in the shared `sb`
+environment. Make targets also invoke scripts through `uv run --active --no-sync`.
 
 `make step-00` runs `data/build/00_scaffold.py --config configs/data.yaml`.
 Make automatically exposes `step-NN` for each `NN_<name>.py` script added to

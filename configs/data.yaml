@@ -16,6 +16,7 @@ paths:
   tests: tests
   logs: data/interim/logs
   dropflow: data/interim/dropflow.jsonl
+  sources: data/build/SOURCES.md
 
 logging:
   level: INFO
@@ -40,9 +41,51 @@ filters:
 
 nllb:
   model: facebook/nllb-200-distilled-600M
+  revision: f8d333a098d19b4fd9a8b18f94170487ad3f821d
   num_beams: 5
   num_return: 5
   batch_size: 64
+  test_input: máy tính
+  test_source_lang: vie_Latn
+  test_target_lang: eng_Latn
+
+downloads:
+  min_free_bytes: 60000000000
+  chunk_size_bytes: 1048576
+  timeout_seconds: 60
+  retries: 3
+  retry_backoff_seconds: 1.0
+  user_agent: "viLens-research-data-pipeline/0.1 (source-download; contact: luannt@uit.edu.vn)"
+  wiktextract:
+    english_page: https://kaikki.org/dictionary/English/
+    vietnamese_page: https://kaikki.org/dictionary/Vietnamese/
+    source_page: https://kaikki.org/dictionary/rawdata.html
+  muse:
+    base_url: https://dl.fbaipublicfiles.com/arrival/dictionaries/
+    files: [vi-en.txt, en-vi.txt]
+    page: https://github.com/facebookresearch/MUSE
+  unihan:
+    url: https://www.unicode.org/Public/UCD/latest/ucd/Unihan.zip
+    version_url: https://www.unicode.org/Public/UCD/latest/ucd/ReadMe.txt
+    terms_url: https://www.unicode.org/terms_of_use.html
+  cedict:
+    url: https://www.mdbg.net/chinese/export/cedict/cedict_1_0_ts_utf-8_mdbg.txt.gz
+    page: https://cc-cedict.org/editor/editor.php?handler=Download
+  brysbaert:
+    url: https://www.humanities.mcmaster.ca/~vickup/Concreteness_ratings_Brysbaert_et_al_BRM.csv
+    manual_url: https://doi.org/10.3758/s13428-013-0403-5
+  flores:
+    repo: openlanguagedata/flores_plus
+    revision: 5fec6c13f9e5a4db2f745d4ec0d7c9721ddc4f06
+    page: https://huggingface.co/datasets/openlanguagedata/flores_plus
+    splits: [dev, devtest]
+    languages: [vie_Latn, eng_Latn, cmn_Hans, fra_Latn, ind_Latn]
+  lid:
+    glotlid_repo: cis-lmu/glotlid
+    glotlid_revision: 85cd6716494360367b75f642b5bc78667605d0b4
+    fasttext_url: https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin
+    test_text: Tôi đang học tiếng Việt
+    top_k: 1
 
 models:
   gemma:

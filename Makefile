@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := all
 
-PYTHON ?= python
+PYTHON ?= uv run --active --no-sync python
 CONFIG ?= configs/data.yaml
 BUILD_DIR := $(shell $(PYTHON) -B -c 'from data.build.common import load_config; import sys; print(load_config(sys.argv[1])["paths"]["build"])' "$(CONFIG)")
 ifeq ($(strip $(BUILD_DIR)),)
@@ -14,14 +14,16 @@ ifneq ($(words $(STEP_NUMBERS)),$(words $(sort $(STEP_NUMBERS))))
 $(error Expected exactly one script per step in $(BUILD_DIR))
 endif
 
-.PHONY: all test $(STEP_TARGETS)
+.PHONY: all download test $(STEP_TARGETS)
 # Steps consume previous steps' outputs, including when called with make -j.
 .NOTPARALLEL:
 
 all: $(STEP_TARGETS)
 
 $(STEP_TARGETS): step-%:
-	$(PYTHON) -B $(filter $(BUILD_DIR)/$*_%.py,$(STEP_SCRIPTS)) --config "$(CONFIG)"
+	PYTORCH_ENABLE_MPS_FALLBACK=1 $(PYTHON) -B $(filter $(BUILD_DIR)/$*_%.py,$(STEP_SCRIPTS)) --config "$(CONFIG)"
+
+download: step-01
 
 test:
 	$(PYTHON) -B -m pytest

@@ -25,7 +25,7 @@ def test_scaffold_uses_config_and_is_idempotent(tmp_path: Path) -> None:
     assert second.stdout == first.stdout
     assert log.read_bytes() == log_bytes
     for key, value in config["paths"].items():
-        if key != "dropflow":
+        if key not in {"dropflow", "sources"}:
             assert Path(value).is_dir()
     assert not Path(config["paths"]["dropflow"]).exists()
 

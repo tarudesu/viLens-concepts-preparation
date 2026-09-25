@@ -17,7 +17,7 @@ def main() -> int:
         config = load_config(args.config)
         paths = config["paths"]
         directory_keys = ("raw", "interim", "out", "build", "prompts", "tests", "logs")
-        for key in (*directory_keys, "dropflow"):
+        for key in (*directory_keys, "dropflow", "sources"):
             if not isinstance(paths[key], str) or not paths[key].strip():
                 raise DataConfigError(f"paths.{key} must be a non-empty path string")
         logger = setup_logging(Path(__file__).stem, paths["logs"], level=config["logging"]["level"])
