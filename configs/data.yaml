@@ -114,3 +114,20 @@ inspection:
     - [13312, 19903]
     - [19968, 40959]
     - [131072, 173791]
+  yield:
+    recursive_discovery_entries: 50000
+    trans_marker_entries: 200000
+    spot_lemmas: [water, computer, dog, house, eat, book, red, hospital, research, tree, go, big, mother, school, money]
+    subpage_examples: 10
+    mandarin_nonmatch_examples: 10
+    category_names_top_n: 60
+    etymology_templates_top_n: 40
+    cjk_tag_sets_top_n: 3
+    cjk_examples_per_tag_set: 10
+    mandarin_code: cmn
+    mandarin_exact_lang_names: [Chinese, Chinese Mandarin]
+    mandarin_required_tag: Mandarin
+    simplified_tag: Simplified
+    traditional_tag: Traditional
+    subpage_markers: [trans-see, see-translation, translation subpage]
+    proto_terms: [Proto-Vietic, Proto-Mon-Khmer, Proto-Austroasiatic]
