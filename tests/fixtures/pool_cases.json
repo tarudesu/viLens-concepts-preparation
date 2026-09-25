@@ -1,0 +1,26 @@
+{
+  "mandarin": [
+    {"input": "電腦 / 电脑", "expected": ["电脑"]},
+    {"input": "电脑", "expected": ["电脑"]},
+    {"input": "電腦", "expected": ["电脑"]}
+  ],
+  "duplicate": {
+    "item": {"lang_code": "vi", "word": "máy tính", "sense": "computer", "tags": []},
+    "locations": ["top", "senses"],
+    "expected_location": "both"
+  },
+  "drop_tag": {
+    "item": {"lang_code": "vi", "word": "cũ", "sense": "old", "tags": ["obsolete"]},
+    "expected_rule": "drop_tags"
+  },
+  "missing_word": {
+    "item": {"lang_code": "vi", "note": "máy tính", "sense": "computer"},
+    "expected_rule": "missing_word"
+  },
+  "join": {
+    "word": "lớn",
+    "requested_pos": "adj",
+    "entries": [{"word": "lớn", "pos": "noun"}],
+    "expected_type": "word_only"
+  }
+}

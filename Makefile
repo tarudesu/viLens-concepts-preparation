@@ -14,7 +14,7 @@ ifneq ($(words $(STEP_NUMBERS)),$(words $(sort $(STEP_NUMBERS))))
 $(error Expected exactly one script per step in $(BUILD_DIR))
 endif
 
-.PHONY: all download test $(STEP_TARGETS)
+.PHONY: all download pool test $(STEP_TARGETS)
 # Steps consume previous steps' outputs, including when called with make -j.
 .NOTPARALLEL:
 
@@ -24,6 +24,8 @@ $(STEP_TARGETS): step-%:
 	PYTORCH_ENABLE_MPS_FALLBACK=1 $(PYTHON) -B $(filter $(BUILD_DIR)/$*_%.py,$(STEP_SCRIPTS)) --config "$(CONFIG)"
 
 download: step-01
+
+pool: step-03
 
 test:
 	$(PYTHON) -B -m pytest

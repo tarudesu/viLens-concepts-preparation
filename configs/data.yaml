@@ -22,8 +22,16 @@ logging:
   level: INFO
 
 chinese:
-  code_field: TODO  # TODO: set the source field containing the Chinese language code.
-  simplified_only: true
+  lang_code: cmn
+  split_on: "/"
+  prefer_simplified: true
+
+pool:
+  pos_keep: [noun, verb, adj]
+  max_en_words: 2
+  drop_tags: [obsolete, archaic, dated, rare, dialectal, historical]
+  translation_locations: [top, senses]
+  max_item_drop_rate: 0.02
 
 heldout:
   fewshot_n: 30
