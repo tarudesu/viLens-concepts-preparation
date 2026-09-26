@@ -294,6 +294,17 @@ prompts:
     ru_output: data/interim/12_ru.parquet
     output_dir: data/prompts
 
+direction_prompts:
+  expected_concepts: 132
+  fit_fraction: 0.8
+  fewshot_set: 1
+  languages: [vi, en, zh, fr, id]
+  labels: {vi: "Tiếng Việt", en: "English", zh: "中文", fr: "Français", id: "Bahasa Indonesia"}
+  formats: [repetition, translation]
+  paths:
+    input: data/interim/12_ru.parquet
+    output: data/prompts/directions_matched.jsonl
+
 release:
   require_resolved_concreteness: true
 
