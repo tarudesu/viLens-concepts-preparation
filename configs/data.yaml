@@ -280,6 +280,24 @@ direction_flores:
     output: data/prompts/directions_flores.jsonl
 
 release:
+  hf_repo: tarudesu/viLens-concepts
+  private: true
+  include_concreteness_values: false # Enable only after Brysbaert terms are confirmed.
+  drop_columns: [in_muse]
+  package:
+    output_dir: release
+    input_concepts: data/concepts.tsv
+    prompts_dir: data/prompts
+    agreement: data/agreement.md
+    amendments: PROTOCOL_AMENDMENTS.md
+    prereg: PREREG.md
+    sources: data/build/SOURCES.md
+    card_template: data/build/15_release_card.md
+    scripts_source: data/build/release_scripts
+    flores_dir: data/raw/flores
+    muse_vi_en: data/raw/muse/vi-en.txt
+    muse_en_vi: data/raw/muse/en-vi.txt
+    brysbaert: data/raw/brysbaert/13428_2013_403_MOESM1_ESM.xlsx
   require_resolved_concreteness: true
   qa_sample_per_stratum: 50
   paths:

@@ -34,3 +34,56 @@
 Wikidata SPARQL query attempt date: 2026-09-25 UTC. No response was retrieved or cached; the first batch timed out after five attempts.
 
 Wikidata Action API query date: 2026-09-25 UTC; cached responses in data/raw/wikidata_cache/ (per-request SHA-1 keys).
+
+## Release
+
+| property | value |
+|---|---|
+| Hugging Face dataset repository | `tarudesu/viLens-concepts` |
+| Visibility | private |
+| Dataset-repo tag | `v1.2` |
+| Upload commit | `5180e3e73c73b92d584f6daf0ce34d5fd5ee1e94` |
+
+SHA-256 manifest for all package files uploaded in that commit:
+
+| file | bytes | SHA-256 |
+|---|---:|---|
+| `LICENSE` | 391 | a61e4ed3bb905248af29a364d921c089705b8f6983cc856734e9c30434a4d924 |
+| `PREREG.md` | 15443 | 1d89d4b9bb968369c93a02c3ef97e02cc792731cc99e64aea6097055dc89e644 |
+| `PROTOCOL_AMENDMENTS.md` | 8164 | 8dfa08e2cd1e85b950fb47bcd81d0dbdf637d7a0ac1779b3d808c0db3b9883e6 |
+| `README.md` | 11809 | 1407d49f7e32505a2ac7422540c7842f34b75090fcdf4a2b090281aba675745c |
+| `SOURCES.md` | 11162 | 01bf7b43fb6c0d6afc9fe496ea03cc2e223538990d812cf950e5c92168e76972 |
+| `agreement.md` | 15634 | e660fe1bf48efddc8dfa7e9aee34143b9cd045a4b61d24ab8e1d394c280f9fd5 |
+| `concepts.tsv` | 715507 | 959523be3a1ef378d72254ce7ed52165fe446bb292fedb62a15e7fd2af854fcc |
+| `prompts/cloze_diac_set1.jsonl` | 191822 | eb6a28c1e0aa567ec1bbff97fbaa8a5e05b7ce65caf1589d38c6ccafff9261fa |
+| `prompts/cloze_nodiac_set1.jsonl` | 95770 | b4e2425ed8329bc86e3dac0ce9c2fb29ea2b2fe9aa56f830c82078cb24c08e8f |
+| `prompts/directions_matched.jsonl` | 562045 | dd0e5fc8ce9366a1df7b38f8555f50e418706045bd4d36fb96acaeec5812dd83 |
+| `prompts/repetition_diac_set1.jsonl` | 995721 | e9804c7b44e096a2d410d9551b8fffbeacd92f08c3f0823526d6d59d64810a08 |
+| `prompts/repetition_diac_set2.jsonl` | 1022249 | 2d5eff20242cc5156a3ffee0dde8bf992bb96e51e8678cc1f65c2390c20ba46d |
+| `prompts/repetition_diac_set3.jsonl` | 965877 | 8abfaa9ed700adf5dcb1051f5f2c44c382fee95e7980ecb7d62d849d689bd4fb |
+| `prompts/repetition_diac_set4.jsonl` | 1038829 | af991f4d3bf9522c131e97a94935775caa946e1bf54d8f8dc26137c02341a10e |
+| `prompts/repetition_diac_set5.jsonl` | 959245 | 1d8d2d4e22e3c3f78eaa8c8541c3f82184b855aeaef8c677c4012d4e1348710f |
+| `prompts/repetition_diac_set6.jsonl` | 965877 | a5b9ad871b8c1db495e27ab8075c01f6af527511b0360419a388801f8e89caaa |
+| `prompts/repetition_nodiac_set1.jsonl` | 641393 | 9afe85547c87bca7c2b1747908cdb768f612a5690ddfb5fd24cd9df7c9f9cab2 |
+| `prompts/repetition_nodiac_set2.jsonl` | 656225 | 46925adfb5396f26bff09152f0d57229e1937b3cd231ddda15b64b34bae7170d |
+| `prompts/repetition_nodiac_set3.jsonl` | 624089 | 0e29dcf67457f4cd8e923bd6fd95ef2b6123082d24d9fa8318a8cd3db5dd46b7 |
+| `prompts/repetition_nodiac_set4.jsonl` | 671057 | f1cb68f03b010c5554f003ad9071742fb97492740f71f8e76761414987e6b3d8 |
+| `prompts/repetition_nodiac_set5.jsonl` | 619145 | cfdc90ee88044b5510302bd614c92afa0eaa89c318869bd85a8807f30c7ddc61 |
+| `prompts/repetition_nodiac_set6.jsonl` | 629033 | 3a960ca83ec0240f486bce23b4509606d7c4f087cd658ed85a7530f4638a7753 |
+| `prompts/translation_diac_set1.jsonl` | 1067205 | fb894bb19e43d57c5d173f17bb9fd26492891ccfccfc01340e90743bc949ef77 |
+| `prompts/translation_diac_set2.jsonl` | 1098498 | 54f1e8fa653d1e70413283594a9ed2033723988caec7a401c46cca06ac69ff2e |
+| `prompts/translation_diac_set3.jsonl` | 1067205 | c76e6e8f05f7abc9170e424a26948815c3e9fcd26a3922dce10857e29af734a5 |
+| `prompts/translation_diac_set4.jsonl` | 1133085 | 5d16938956de4c19173a5b2a1027076a0ae7dca7c3b7dd588e8f1c4ac046165b |
+| `prompts/translation_diac_set5.jsonl` | 1058970 | 8b7058df84cec38c7cf9e84241403a8ee3eebf55f06ecb81ff9f0613b905b8fc |
+| `prompts/translation_diac_set6.jsonl` | 1016148 | d02b10b7d176f11693fe0f8ebb2efbadcd8c48115ded444fb5deb9b0fa2d34b4 |
+| `prompts/translation_nodiac_set1.jsonl` | 748085 | fff9e0eaafae9604204368835b599e0ca0da204134feb726074d88472c71c6d6 |
+| `prompts/translation_nodiac_set2.jsonl` | 768927 | 7c3c3d83b00213d4bd4d768cce782f4dcc9c2b047f3e2b8150d9198f0b2e335e |
+| `prompts/translation_nodiac_set3.jsonl` | 750537 | 9eceb035ca246bed95f76a70a0f8a851334f708af4ef71d364092253c18d4dbe |
+| `prompts/translation_nodiac_set4.jsonl` | 795899 | 165faaabef0b5b48f19496d96363a849cb574dc8c765a3d10fcc75ae6381237f |
+| `prompts/translation_nodiac_set5.jsonl` | 744407 | cb6f46b7d226addcd7e3cd7d7f1529d6d5282d076b9c1080df86c4a594118ed8 |
+| `prompts/translation_nodiac_set6.jsonl` | 714983 | 2f49370f49225704aaf08d2a8affbf4d81c309c0d1941725a4da31e008fe3392 |
+| `scripts/add_concreteness.py` | 11134 | e10be141147fd557af847693a3a0d72baaf77978c3c9ecc0526b299e97f40b86 |
+| `scripts/add_muse_flag.py` | 5435 | 8c13601237c4343e73495508f91152ebff71ee225378a7095246d553ffbf3a97 |
+| `scripts/build_flores_directions.py` | 6288 | 67c36e05301a56ec34ad6bf857545cca545a5ec329c8b461d7a9984994dc76c8 |
+
+The Hugging Face dataset repository also contains a platform-generated `.gitattributes` file (not part of the uploaded package directory): 2504 bytes, SHA-256 `9e75dd981de037ec3769f24f790e126bc5a160b6871f510214e68dc70649aeeb`.

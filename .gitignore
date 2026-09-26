@@ -12,6 +12,7 @@ data/interim/logs/*
 
 # Python and local tooling.
 keys/
+/release/
 __pycache__/
 *.py[cod]
 .pytest_cache/
