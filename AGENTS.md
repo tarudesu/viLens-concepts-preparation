@@ -68,6 +68,8 @@ Each step reads only the outputs of earlier steps (or `data/raw`) and writes to 
 
 **Checkpoints:** after steps **02, 06, 08, 12** a human reviews the output before work continues. At a checkpoint, finish the step, print the REPORT BACK items, commit, and **stop**. Do not start the next step, and do not "pre-implement" later steps.
 
+A checkpoint that has been reviewed and approved does not block later re-runs of that step when a task explicitly instructs the re-run. Checkpoints still block starting a NEW step beyond the latest approved checkpoint unless the task says otherwise.
+
 ---
 
 ## 5. Coding conventions (apply to every script)

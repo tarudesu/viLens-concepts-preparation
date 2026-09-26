@@ -34,6 +34,7 @@ def test_vietnamese_normalization_and_syllable_containment() -> None:
     assert step07.contains("hố", "cái hố", max_extra_syllables=4)
     assert not step07.contains("ao", "một cái ao ở cuối con đường xa", max_extra_syllables=4)
     assert not step07.contains("hố sâu", "sâu cái hố", max_extra_syllables=4)
+    assert step07.contains("hoà", "hòa.", max_extra_syllables=4)
 
 
 def test_second_hop_cleaning_articles_and_verb_marker() -> None:
@@ -86,6 +87,10 @@ def test_process_rows_with_mocked_model_covers_parts_a_and_b() -> None:
     assert result["fwd_hit"] is True
     assert result["bt_route"] == "strict"
     assert result["bt_match"] == "alt"
+    assert result["canonical_promoted"] is True
+    assert result["vi_promoted_from"] == "mèo"
+    assert result["vi_canonical"] == "miêu"
+    assert result["vi_alts"] == ["mèo"]
     assert result["bt_pass_top1"] is False
     assert result["en_hit"] is True
     assert result["fr_canonical"] == "félin"

@@ -226,3 +226,5 @@ inspection:
     traditional_tag: Traditional
     subpage_markers: [trans-see, see-translation, translation subpage]
     proto_terms: [Proto-Vietic, Proto-Mon-Khmer, Proto-Austroasiatic]
+    orth_merge_examples_n: 10
+    promotion_examples_n: 15

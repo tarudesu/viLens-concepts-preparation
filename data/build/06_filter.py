@@ -19,9 +19,9 @@ import pyarrow.parquet as pq
 from wordfreq import zipf_frequency
 
 try:
-    from common import DropflowLogger, load_config, normalize_nfc, normalize_strings, normalized_levenshtein, setup_logging, strip_diacritics
+    from common import DropflowLogger, load_config, normalize_nfc, normalize_strings, normalized_levenshtein, setup_logging, strip_diacritics, vi_orth_key
 except ModuleNotFoundError:
-    from data.build.common import DropflowLogger, load_config, normalize_nfc, normalize_strings, normalized_levenshtein, setup_logging, strip_diacritics
+    from data.build.common import DropflowLogger, load_config, normalize_nfc, normalize_strings, normalized_levenshtein, setup_logging, strip_diacritics, vi_orth_key
 
 
 STEP = "06_filter"
@@ -75,6 +75,87 @@ def summed_vi_senses(candidate: dict[str, Any]) -> int:
     return sum(values)
 
 
+def merge_vi_candidates(
+    candidates: list[dict[str, Any]],
+    zipf: dict[str, float],
+    attestation_sources: list[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int, list[dict[str, Any]]]:
+    """Merge spelling-equivalent VI candidates and select a frequency-ranked display form."""
+    source_flags = {
+        "wiktextract_table": "in_wiktextract", "vi_gloss": "in_vi_gloss",
+        "muse": "in_muse", "wikidata": "in_wikidata",
+    }
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for candidate in candidates:
+        if not isinstance(candidate, dict) or not isinstance(candidate.get("word"), str):
+            raise ValueError(f"Malformed Vietnamese candidate: {candidate!r}")
+        word = normalize_nfc(candidate["word"].strip())
+        if not word:
+            raise ValueError(f"Empty Vietnamese candidate: {candidate!r}")
+        grouped[vi_orth_key(word)].append({**candidate, "word": word})
+
+    merged: list[dict[str, Any]] = []
+    variant_records: list[dict[str, Any]] = []
+    examples: list[dict[str, Any]] = []
+    merged_count = 0
+    for key in sorted(grouped):
+        variants = grouped[key]
+        unique_words = sorted({candidate["word"] for candidate in variants})
+        if not key:
+            raise ValueError(f"VI candidate normalizes to an empty orthographic key: {variants!r}")
+
+        def display_rank(candidate: dict[str, Any]) -> tuple[Any, ...]:
+            word = candidate["word"]
+            frequency = zipf.setdefault(word, float(zipf_frequency(word, "vi")))
+            return (-frequency, int(word.casefold() != key), word.casefold(), word)
+
+        variants.sort(key=display_rank)
+        display_candidate = dict(variants[0])
+        if len(variants) > 1:
+            merged_count += len(variants) - 1
+            examples.append({"orth_key": key, "display": display_candidate["word"], "variants": unique_words})
+            for field in ("n_senses_vi", "categories", "etymology_templates", "etymology_text", "cjk_forms"):
+                values = [candidate.get(field) for candidate in variants]
+                if any(not isinstance(value, list) for value in values):
+                    raise ValueError(f"VI orthographic variants have malformed {field}: {variants!r}")
+                display_candidate[field] = [item for value in values for item in value]
+            entry_counts = [candidate.get("n_vi_entries") for candidate in variants]
+            if any(type(count) is not int or count < 1 for count in entry_counts):
+                raise ValueError(f"VI orthographic variants have malformed n_vi_entries: {variants!r}")
+            display_candidate["n_vi_entries"] = sum(entry_counts)
+            display_candidate["vi_pos"] = sorted({pos for candidate in variants for pos in candidate.get("vi_pos", [])})
+            for flag in ("in_wiktextract", "in_vi_gloss", "in_muse", "in_wikidata"):
+                if any(flag in candidate for candidate in variants):
+                    if any(type(candidate.get(flag)) is not bool for candidate in variants):
+                        raise ValueError(f"VI orthographic variant has malformed {flag}: {variants!r}")
+                    display_candidate[flag] = any(candidate[flag] for candidate in variants)
+            if any("external_attested" in candidate for candidate in variants):
+                display_candidate["external_attested"] = any(bool(candidate.get("external_attested")) for candidate in variants)
+            if any("n_sources" in candidate for candidate in variants):
+                if not attestation_sources:
+                    raise ValueError("Cannot merge attestation counts without filters.attestation_sources")
+                display_candidate["n_sources"] = sum(
+                    int(bool(display_candidate.get(source_flags[name]))) for name in attestation_sources
+                )
+            locations = {str(candidate.get("source_location")) for candidate in variants}
+            if "both" in locations or {"top", "senses"}.issubset(locations):
+                display_candidate["source_location"] = "both"
+            elif len(locations) == 1:
+                display_candidate["source_location"] = next(iter(locations))
+
+        senses = display_candidate.get("n_senses_vi")
+        if not isinstance(senses, list) or not senses or display_candidate.get("n_vi_entries") != len(senses):
+            raise ValueError(f"Merged VI candidate has malformed entry/sense counts: {display_candidate!r}")
+        merged.append(display_candidate)
+        variant_records.append({
+            "orth_key": key, "display": display_candidate["word"], "variants": unique_words,
+            "n_senses_vi": list(senses), "n_vi_entries": display_candidate["n_vi_entries"],
+            "n_sources": display_candidate["n_sources"], "external_attested": display_candidate["external_attested"],
+            "loan_templates_found": [],
+        })
+    return merged, variant_records, merged_count, examples
+
+
 def canonical_vi(candidates: list[dict[str, Any]], zipf: dict[str, float]) -> tuple[dict[str, Any], list[str], int]:
     """Choose VI form by source evidence, polysemy, frequency, length, and spelling."""
     if not candidates:
@@ -86,7 +167,7 @@ def canonical_vi(candidates: list[dict[str, Any]], zipf: dict[str, float]) -> tu
         word = normalize_nfc(candidate["word"].strip())
         if not word:
             raise ValueError(f"Empty Vietnamese candidate: {candidate!r}")
-        unique.setdefault(word.casefold(), candidate)
+        unique.setdefault(vi_orth_key(word), candidate)
     ranked: list[tuple[tuple[Any, ...], dict[str, Any], str, int]] = []
     for candidate in unique.values():
         word = normalize_nfc(candidate["word"].strip())
@@ -96,7 +177,7 @@ def canonical_vi(candidates: list[dict[str, Any]], zipf: dict[str, float]) -> tu
             raise ValueError(f"Missing attestation flags on VI candidate: {candidate!r}")
         sense_count = summed_vi_senses(candidate)
         frequency = zipf.setdefault(word, float(zipf_frequency(word, "vi")))
-        ranked.append(((-n_sources, -int(external), sense_count, -frequency, len(word), word), candidate, word, sense_count))
+        ranked.append(((-n_sources, -int(external), sense_count, -frequency, len(word), word.casefold(), word), candidate, word, sense_count))
     ranked.sort(key=lambda item: item[0])
     _, selected, word, senses = ranked[0]
     alts = [item[2] for item in ranked[1:]]
@@ -257,8 +338,18 @@ def _dropflow_without_step(path: Path, step: str) -> None:
 
 
 def _output_schema(schema: pa.Schema) -> pa.Schema:
+    vi_variant = pa.struct([
+        pa.field("orth_key", pa.string()), pa.field("display", pa.string()),
+        pa.field("variants", pa.list_(pa.string())), pa.field("n_senses_vi", pa.list_(pa.int32())),
+        pa.field("n_vi_entries", pa.int32()), pa.field("n_sources", pa.int8()),
+        pa.field("external_attested", pa.bool_()),
+        pa.field("loan_templates_found", pa.list_(pa.struct([
+            pa.field("template", pa.string()), pa.field("source_lang", pa.string()), pa.field("args3", pa.string()),
+        ]))),
+    ])
     additions = [
         pa.field("vi_canonical", pa.string()), pa.field("vi_alts", pa.list_(pa.string())),
+        pa.field("vi_variants", pa.list_(vi_variant)), pa.field("polysemy_cutoff", pa.float64()),
         pa.field("n_senses_vi", pa.int32()), pa.field("n_vi_entries", pa.int32()),
         pa.field("n_sources", pa.int8()), pa.field("external_attested", pa.bool_()),
         pa.field("zh_canonical", pa.string()), pa.field("zh_alts", pa.list_(pa.string())),
@@ -311,7 +402,7 @@ def _deduplicate(rows: list[dict[str, Any]], field: str, en_zipf: dict[str, floa
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         value = row["vi_canonical"] if field == "vi_canonical" else row["en_lemma"]
-        key = normalize_nfc(value.strip()).casefold()
+        key = vi_orth_key(value) if field == "vi_canonical" else normalize_nfc(value.strip()).casefold()
         grouped[key].append(row)
     keep: list[dict[str, Any]] = []
     actions: list[tuple[str, str, str]] = []
@@ -330,7 +421,7 @@ def assert_split_disjointness(rows_by_split: dict[str, list[dict[str, Any]]]) ->
             terms = {
                 "concept_id": [normalize_nfc(row["concept_id"]).casefold()],
                 "en": [normalize_nfc(row["en_lemma"]).casefold()],
-                "vi": [normalize_nfc(candidate["word"]).casefold() for candidate in row["vi_cands"]],
+                "vi": [vi_orth_key(candidate["word"]) for candidate in row["vi_cands"]],
             }
             for kind, values in terms.items():
                 for value in values:
@@ -357,7 +448,8 @@ def run(config_path: str) -> dict[str, Any]:
         near_n = int(report["surface_near_threshold_n"])
         dedup_examples_n = int(report["dedup_examples_n"])
         hyphen_examples_n = int(report["hyphen_examples_n"])
-        if progress_every < 1 or row_group_size < 1 or not 0 <= threshold <= 1 or not 0 <= percentile <= 100 or report_bin <= 0 or near_n < 0 or dedup_examples_n < 0 or hyphen_examples_n < 0:
+        orth_merge_examples_n = int(report["orth_merge_examples_n"])
+        if progress_every < 1 or row_group_size < 1 or not 0 <= threshold <= 1 or not 0 <= percentile <= 100 or report_bin <= 0 or near_n < 0 or dedup_examples_n < 0 or hyphen_examples_n < 0 or orth_merge_examples_n < 0:
             raise ValueError("Invalid step-06 numeric setting in config")
         if filters["polysemy_count"] != "sum_over_homograph_entries":
             raise ValueError(f"Unsupported filters.polysemy_count: {filters['polysemy_count']!r}")
@@ -398,26 +490,32 @@ def run(config_path: str) -> dict[str, Any]:
         prepared: dict[str, list[dict[str, Any]]] = {split: [] for split in SPLITS}
         zh_latin_removed: Counter[str] = Counter()
         loan_info_by_id: dict[str, tuple[str, list[dict[str, str | None]], list[dict[str, str | None]]]] = {}
+        vi_merged_candidate_count = 0
+        vi_merge_examples: list[dict[str, Any]] = []
         for index, original in enumerate(sorted(rows, key=lambda row: row["concept_id"]), start=1):
             row = dict(original)
             split = row["split"]
             try:
-                selected, vi_alts, vi_senses = canonical_vi(row["vi_cands"], zipf_cache)
+                merged_vi, variant_records, merged_count, merge_examples = merge_vi_candidates(
+                    row["vi_cands"], zipf_cache, filters["attestation_sources"],
+                )
+                vi_merged_candidate_count += merged_count
+                vi_merge_examples.extend({
+                    "concept_id": row["concept_id"], "en_lemma": row["en_lemma"], "split": split, **example,
+                } for example in merge_examples)
+                selected, vi_alts, vi_senses = canonical_vi(merged_vi, zipf_cache)
                 vi_word = normalize_nfc(selected["word"].strip())
                 row.update({
                     "vi_canonical": vi_word, "vi_alts": vi_alts, "n_senses_vi": vi_senses,
                     "n_vi_entries": selected["n_vi_entries"], "n_sources": selected["n_sources"],
-                    "external_attested": selected["external_attested"],
+                    "external_attested": selected["external_attested"], "vi_variants": variant_records,
                 })
-                same_form = [candidate for candidate in row["vi_cands"] if candidate["word"].casefold() == vi_word.casefold()]
-                row["loan_templates_found"] = sorted(
-                    (record for candidate in same_form for record in loan_templates_found(candidate, loan_templates)),
-                    key=lambda item: (item["template"] or "", item["source_lang"] or "", item["args3"] or ""),
-                )
-                previous_records = sorted(
-                    (record for candidate in same_form for record in loan_templates_found(candidate, previous_templates)),
-                    key=lambda item: (item["template"] or "", item["source_lang"] or "", item["args3"] or ""),
-                )
+                for group, candidate in zip(variant_records, merged_vi, strict=True):
+                    group["loan_templates_found"] = loan_templates_found(candidate, loan_templates)
+                selected_group = next(group for group in variant_records if group["orth_key"] == vi_orth_key(vi_word))
+                row["loan_templates_found"] = selected_group["loan_templates_found"]
+                selected_raw = next(candidate for candidate in merged_vi if vi_orth_key(candidate["word"]) == vi_orth_key(vi_word))
+                previous_records = loan_templates_found(selected_raw, previous_templates)
                 loan_info_by_id[row["concept_id"]] = (vi_word, row["loan_templates_found"], previous_records)
                 missing = []
                 for language in LANGUAGES:
@@ -439,6 +537,11 @@ def run(config_path: str) -> dict[str, Any]:
                 raise ValueError(f"Step-06 canonicalization failed for concept {row.get('concept_id')!r}: {exc}") from exc
             if index % progress_every == 0 or index == len(rows):
                 logger.info("Canonicalized concepts: %d/%d", index, len(rows))
+
+        logger.info("Vietnamese candidates merged by vi_orth_key: %d", vi_merged_candidate_count)
+        logger.info("VI orthographic-merge examples (en | orth_key | display | merged variants):")
+        for example in sorted(vi_merge_examples, key=lambda item: (item["concept_id"], item["orth_key"]))[:orth_merge_examples_n]:
+            logger.info("%s | %s | %s | %s", example["en_lemma"], example["orth_key"], example["display"], json.dumps(example["variants"], ensure_ascii=False))
 
         stages: dict[str, dict[str, list[dict[str, Any]]]] = {stage: {} for stage in STAGES}
         for split in SPLITS:
@@ -467,6 +570,9 @@ def run(config_path: str) -> dict[str, Any]:
             cutoffs[pos] = _quantile(scores_by_pos[pos], percentile)
             cutoff_n[pos] = sum(value == cutoffs[pos] for value in scores_by_pos[pos])
             logger.info("Polysemy TEST cutoff | pos=%s | percentile=%s | cutoff=%s | exactly_at_cutoff=%d", pos, percentile, cutoffs[pos], cutoff_n[pos])
+        for split in SPLITS:
+            for row in stages["filter5_proper_noun"][split]:
+                row["polysemy_cutoff"] = cutoffs[row["pos"]]
         all_sense_distribution = Counter(row["n_senses_vi"] for split in SPLITS for row in stages["filter5_proper_noun"][split])
         logger.info("Canonical Vietnamese n_senses_vi distribution before polysemy filter: %s", json.dumps(dict(sorted(all_sense_distribution.items())), sort_keys=True))
         for split in SPLITS:

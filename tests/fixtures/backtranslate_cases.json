@@ -6,6 +6,10 @@
     "split": "test",
     "vi_canonical": "mèo",
     "vi_alts": ["miêu"],
+    "vi_variants": [
+      {"orth_key": "mèo", "display": "mèo", "variants": ["mèo"], "n_senses_vi": [1], "n_vi_entries": 1, "n_sources": 2, "external_attested": false, "loan_templates_found": []},
+      {"orth_key": "miêu", "display": "miêu", "variants": ["miêu"], "n_senses_vi": [1], "n_vi_entries": 1, "n_sources": 2, "external_attested": false, "loan_templates_found": []}
+    ],
     "zh_canonical": "猫",
     "zh_alts": ["貓"],
     "fr_canonical": "chat",

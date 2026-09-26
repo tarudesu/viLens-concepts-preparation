@@ -48,6 +48,50 @@ def normalize_nfc(value: str) -> str:
     return unicodedata.normalize("NFC", value)
 
 
+def vi_orth_key(value: str) -> str:
+    """Return a normalized Vietnamese orthographic-equivalence key.
+
+    Older tone placement in open Vietnamese data is mapped to the modern
+    first-vowel placement for open ``oa``, ``oe``, and ``uy`` rimes. A final
+    ``y`` after the specified consonants is folded to ``i``; standalone ``y``
+    and ``qu`` spellings are left intact.
+    """
+    if not isinstance(value, str):
+        raise TypeError(f"vi_orth_key expects str, got {type(value).__name__}")
+
+    tone_marks = {"\u0300", "\u0301", "\u0303", "\u0309", "\u0323"}
+    modern_rimes = {"oa", "oe", "uy"}
+    final_y_onsets = set("bcđdhklmnstvx")
+    modern_syllables: list[str] = []
+
+    for syllable in normalize_nfc(value).casefold().split():
+        graphemes: list[list[str]] = []
+        for char in unicodedata.normalize("NFD", syllable):
+            if unicodedata.combining(char):
+                if not graphemes:
+                    graphemes.append([char])
+                else:
+                    graphemes[-1].append(char)
+            else:
+                graphemes.append([char])
+
+        bases = "".join(group[0] for group in graphemes)
+        if len(graphemes) >= 2 and bases[-2:] in modern_rimes and not bases.startswith("qu"):
+            first, second = graphemes[-2], graphemes[-1]
+            old_tone = [mark for mark in second[1:] if mark in tone_marks]
+            if old_tone:
+                second[:] = [second[0], *(mark for mark in second[1:] if mark not in tone_marks)]
+                first.extend(old_tone)
+
+        bases = "".join(group[0] for group in graphemes)
+        if bases.endswith("y") and bases[0] in final_y_onsets and not bases.startswith("qu"):
+            graphemes[-1][0] = "i"
+
+        modern_syllables.append(normalize_nfc("".join("".join(group) for group in graphemes)))
+
+    return " ".join(modern_syllables)
+
+
 def strip_diacritics(value: str) -> str:
     """Remove combining marks and Vietnamese đ/Đ from a string."""
 

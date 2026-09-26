@@ -19,9 +19,9 @@ import pyarrow.parquet as pq
 from wordfreq import zipf_frequency
 
 try:  # Direct script execution and package-based tests.
-    from common import DropflowLogger, load_config, normalize_nfc, normalize_strings, setup_logging
+    from common import DropflowLogger, load_config, normalize_nfc, normalize_strings, setup_logging, vi_orth_key
 except ModuleNotFoundError:
-    from data.build.common import DropflowLogger, load_config, normalize_nfc, normalize_strings, setup_logging
+    from data.build.common import DropflowLogger, load_config, normalize_nfc, normalize_strings, setup_logging, vi_orth_key
 
 
 STEP = "05_split"
@@ -68,8 +68,8 @@ def concept_syllable_bucket(row: dict[str, Any], edges: list[int]) -> str:
     return syllable_bucket(candidate["word"], edges)
 
 
-def connected_components(rows: list[dict[str, Any]]) -> list[list[int]]:
-    """Return row-index components linked by any VI form or English lemma."""
+def connected_components(rows: list[dict[str, Any]], *, orthographic_vi: bool = True) -> list[list[int]]:
+    """Return components linked by English lemmas or VI spelling-equivalence keys."""
     n_rows = len(rows)
     parents = list(range(n_rows))
     ranks = [0] * n_rows
@@ -106,7 +106,8 @@ def connected_components(rows: list[dict[str, Any]]) -> list[list[int]]:
         for candidate in candidates:
             if not isinstance(candidate, dict):
                 raise ValueError(f"Concept {concept_id!r} contains a non-object VI candidate")
-            terms.add(("vi", _term_key(candidate.get("word"), field="vi candidate word")))
+            word = _term_key(candidate.get("word"), field="vi candidate word")
+            terms.add(("vi", vi_orth_key(word) if orthographic_vi else word))
         for term in sorted(terms):
             previous = seen_terms.setdefault(term, index)
             union(index, previous)
@@ -121,10 +122,12 @@ def connected_components(rows: list[dict[str, Any]]) -> list[list[int]]:
     return components
 
 
-def describe_components(rows: list[dict[str, Any]], edges: list[int]) -> list[Component]:
+def describe_components(
+    rows: list[dict[str, Any]], edges: list[int], *, orthographic_vi: bool = True,
+) -> list[Component]:
     """Attach representative POS/syllable strata and mixed-label diagnostics."""
     result: list[Component] = []
-    for indexes in connected_components(rows):
+    for indexes in connected_components(rows, orthographic_vi=orthographic_vi):
         members = tuple(rows[index] for index in indexes)
         first = members[0]
         stratum = (normalize_nfc(first["pos"]), concept_syllable_bucket(first, edges))
@@ -245,7 +248,7 @@ def assert_disjoint_splits(rows: list[dict[str, Any]]) -> None:
         candidates = row.get("vi_cands")
         if not isinstance(candidates, list):
             raise ValueError(f"Concept {concept_id!r} has malformed vi_cands")
-        terms.extend(("vi", _term_key(item.get("word"), field="vi candidate word")) for item in candidates)
+        terms.extend(("vi", vi_orth_key(_term_key(item.get("word"), field="vi candidate word"))) for item in candidates)
         for term in terms:
             prior = owners.setdefault(term, split_name)
             if prior != split_name:
@@ -381,7 +384,18 @@ def run(config_path: str) -> dict[str, Any]:
 
         # The top tercile starts at the 2/3 quantile of concept-weighted pool Zipf scores.
         zipf_threshold = float(np.quantile(np.asarray(zipf_values, dtype=np.float64), 2.0 / 3.0))
-        components = describe_components(rows, bin_edges)
+        previous_components = describe_components(rows, bin_edges, orthographic_vi=False)
+        components = describe_components(rows, bin_edges, orthographic_vi=True)
+        previous_memberships = {frozenset(member["concept_id"] for member in component.members) for component in previous_components}
+        current_memberships = {frozenset(member["concept_id"] for member in component.members) for component in components}
+        previous_changed = previous_memberships - current_memberships
+        current_changed = current_memberships - previous_memberships
+        affected_concepts = len(set().union(*previous_changed, *current_changed)) if previous_changed or current_changed else 0
+        logger.info(
+            "Orthographic component changes vs prior raw-form graph: prior_components_changed=%d; "
+            "new_components_changed=%d; affected_concepts=%d",
+            len(previous_changed), len(current_changed), affected_concepts,
+        )
         component_distribution = Counter(
             "1" if len(component.members) == 1 else
             "2" if len(component.members) == 2 else
@@ -490,13 +504,15 @@ def run(config_path: str) -> dict[str, Any]:
                         row["en_lemma"], row["pos"], candidate["word"],
                         _format_words(row["zh_cands"]), _format_words(row["fr_cands"]),
                         _format_words(row["id_cands"]), candidate["n_sources"])
-        logger.info("Disjointness assertions passed: concept_id, VI forms, and English lemmas are split-exclusive")
+        logger.info("Disjointness assertions passed: concept_id, VI orthographic-equivalence keys, and English lemmas are split-exclusive")
         logger.info("Outputs: %s; %s; %s; %s",
                     paths["output"], paths["fewshot_reservoir"], paths["directions"], paths["test_pool"])
         elapsed = time.monotonic() - started
         logger.info("Runtime seconds: %.3f", elapsed)
         return {
             "components": len(components), "rows": len(rows),
+            "prior_components_changed": len(previous_changed), "new_components_changed": len(current_changed),
+            "affected_concepts": affected_concepts,
             "split_sizes": {key: len(value) for key, value in row_counts.items()},
             "zipf_threshold": zipf_threshold, "runtime_seconds": elapsed,
         }

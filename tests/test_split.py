@@ -24,6 +24,15 @@ def test_connected_components_link_shared_vi_and_english_terms():
     assert grouped_ids == [["c001", "c002", "c003"], ["c004"], ["c005"]]
 
 
+def test_connected_components_link_vietnamese_orthographic_variants():
+    rows = [
+        {"concept_id": "c101", "en_lemma": "goods", "pos": "noun", "vi_cands": [{"word": "hàng hoá"}]},
+        {"concept_id": "c102", "en_lemma": "cargo", "pos": "noun", "vi_cands": [{"word": "hàng hóa"}]},
+    ]
+    assert splitter.connected_components(rows) == [[0, 1]]
+    assert splitter.connected_components(rows, orthographic_vi=False) == [[0], [1]]
+
+
 def test_component_stratum_uses_first_concept_and_reports_mixing():
     components = splitter.describe_components(fixture_rows(), [1, 2])
     assert components[0].stratum == ("noun", "2")
@@ -75,3 +84,12 @@ def test_disjoint_partitions_pass_assertions():
     rows[0]["split"] = "directions"
     rows[1]["split"] = "test"
     splitter.assert_disjoint_splits(rows)
+
+
+def test_disjointness_assertion_rejects_orthographic_vi_variants_across_splits():
+    rows = [
+        {"concept_id": "c201", "en_lemma": "goods", "pos": "noun", "split": "directions", "vi_cands": [{"word": "hàng hoá"}]},
+        {"concept_id": "c202", "en_lemma": "cargo", "pos": "noun", "split": "test", "vi_cands": [{"word": "hàng hóa"}]},
+    ]
+    with pytest.raises(ValueError, match="Leakage across splits for vi term"):
+        splitter.assert_disjoint_splits(rows)

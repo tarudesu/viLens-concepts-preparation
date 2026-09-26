@@ -73,6 +73,39 @@ def test_canonical_vi_rank_and_homograph_sense_sum() -> None:
     assert step06.summed_vi_senses(FIXTURE["vi_homographs"]) == 4
 
 
+def test_vi_orthographic_candidates_merge_and_promote_frequency_display() -> None:
+    base = {
+        "n_sources": 2, "external_attested": False, "in_wiktextract": True,
+        "in_vi_gloss": True, "in_muse": False, "in_wikidata": False,
+        "n_vi_entries": 1, "n_senses_vi": [2], "vi_pos": ["noun"],
+        "categories": [[]], "etymology_templates": [[]], "etymology_text": [None],
+        "cjk_forms": [[]], "source_location": "top",
+    }
+    candidates = [{**base, "word": "hoà"}, {**base, "word": "hòa"}]
+    merged, variants, count, examples = step06.merge_vi_candidates(
+        candidates, {"hoà": 5.0, "hòa": 4.0}, ["wiktextract_table", "vi_gloss", "muse", "wikidata"],
+    )
+    assert count == 1
+    assert merged[0]["word"] == "hoà"  # Higher Zipf frequency wins.
+    assert variants[0]["variants"] == ["hoà", "hòa"]
+    assert examples[0]["orth_key"] == "hòa"
+
+    merged, _, _, _ = step06.merge_vi_candidates(
+        candidates, {"hoà": 5.0, "hòa": 5.0}, ["wiktextract_table", "vi_gloss", "muse", "wikidata"],
+    )
+    assert merged[0]["word"] == "hòa"  # Equal frequency prefers modern placement.
+
+
+def test_vi_form_dedup_uses_orthographic_key() -> None:
+    rows = [
+        {"concept_id": "old", "en_lemma": "old", "vi_canonical": "hoà", "n_sources": 2, "external_attested": False, "n_senses_vi": 1},
+        {"concept_id": "modern", "en_lemma": "modern", "vi_canonical": "hòa", "n_sources": 3, "external_attested": True, "n_senses_vi": 2},
+    ]
+    kept, actions = step06._deduplicate(rows, "vi_canonical", {})
+    assert [row["concept_id"] for row in kept] == ["modern"]
+    assert actions == [("vi_canonical", "modern", "old")]
+
+
 def test_loanword_source_allowlist_and_template_selection() -> None:
     templates = {"bor", "bor+", "lbor", "der", "der+", "obor"}
     drop_codes = {"fr", "en", "la", "la-new", "la-lat", "la-med", "grc", "pt", "es", "it", "de", "nl", "ru", "ms", "id"}

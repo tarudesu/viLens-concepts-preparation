@@ -21,3 +21,5 @@ v1.2 (2026-09-26; pre-data; no model outputs exist at the time of this amendment
   hallucinates on isolated words, and exact-match round-trip failed 71% of
   monosyllables vs 47% of disyllables. Pre-declared robustness subset:
   bt_pass_strict_v1. Directions pool exempt from filter 2.
+- Vietnamese spelling variants (tone placement, final i/y) are treated as equivalent; the display form is the more frequent one. If back-translation validates only an alternative form, it becomes the canonical form and is re-filtered.
+- Split components and all disjointness checks use the Vietnamese spelling-equivalence key; splits were regenerated (same seed) before any model outputs existed.

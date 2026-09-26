@@ -21,6 +21,7 @@ from data.build.common import (
     setup_logging,
     strip_diacritics,
     stream_jsonl,
+    vi_orth_key,
 )
 
 
@@ -30,6 +31,20 @@ def test_normalize_nfc() -> None:
 
 def test_strip_diacritics_including_vietnamese_d() -> None:
     assert strip_diacritics("Đường phố") == "duong pho"
+
+
+@pytest.mark.parametrize(
+    ("left", "right"),
+    [("hoà", "hòa"), ("khoẻ", "khỏe"), ("thuý", "thúy"), ("kí", "ký"), ("mĩ thuật", "mỹ thuật"), ("may", "mai")],
+)
+def test_vietnamese_orthographic_equivalence(left: str, right: str) -> None:
+    assert vi_orth_key(left) == vi_orth_key(right)
+
+
+def test_vietnamese_orthographic_key_leaves_qu_and_standalone_y_alone() -> None:
+    assert vi_orth_key("quý") == "quý"
+    assert vi_orth_key("quí") == "quí"
+    assert vi_orth_key("y tá") == "y tá"
 
 
 @pytest.mark.parametrize(("left", "right", "expected"), [("", "", 0.0), ("a", "", 1.0), ("same", "same", 0.0), ("cat", "cut", 1 / 3)])

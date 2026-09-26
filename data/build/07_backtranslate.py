@@ -20,12 +20,13 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 from opencc import OpenCC
+from wordfreq import zipf_frequency
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
 try:
-    from common import DropflowLogger, load_config, normalize_nfc, normalize_strings, setup_logging
+    from common import DropflowLogger, load_config, normalize_nfc, normalize_strings, normalized_levenshtein, setup_logging, strip_diacritics, vi_orth_key
 except ModuleNotFoundError:
-    from data.build.common import DropflowLogger, load_config, normalize_nfc, normalize_strings, setup_logging
+    from data.build.common import DropflowLogger, load_config, normalize_nfc, normalize_strings, normalized_levenshtein, setup_logging, strip_diacritics, vi_orth_key
 
 
 STEP = "07_backtranslate"
@@ -79,12 +80,51 @@ def contains(target: str, output: str, *, max_extra_syllables: int) -> bool:
     """Test whether target syllables form a bounded-length contiguous output span."""
     if type(max_extra_syllables) is not int or max_extra_syllables < 0:
         raise ValueError("max_extra_syllables must be a non-negative integer")
-    target_tokens = norm_vi(target).split()
-    output_tokens = norm_vi(output).split()
+    target_tokens = vi_orth_key(norm_vi(target)).split()
+    output_tokens = vi_orth_key(norm_vi(output)).split()
     if not target_tokens or len(output_tokens) > len(target_tokens) + max_extra_syllables:
         return False
     width = len(target_tokens)
     return any(output_tokens[index:index + width] == target_tokens for index in range(len(output_tokens) - width + 1))
+
+
+def alt_only_match(canonical: str, alternatives: list[str], outputs: list[str], *, max_extra_syllables: int) -> tuple[str, str] | None:
+    """Return the first matching alternative only when canonical has no match."""
+    if any(contains(canonical, output, max_extra_syllables=max_extra_syllables) for output in outputs):
+        return None
+    for alternative in alternatives:
+        for output in outputs:
+            if contains(alternative, output, max_extra_syllables=max_extra_syllables):
+                return alternative, output
+    return None
+
+
+def promote_vi_alternative(row: dict[str, Any], alternative: str) -> tuple[str, str]:
+    """Promote an alternative and transfer its VI-entry metadata to the row."""
+    old = row["vi_canonical"]
+    groups = row.get("vi_variants")
+    if not isinstance(groups, list):
+        raise ValueError(f"Concept {row.get('concept_id')!r} lacks VI orthographic groups")
+    key = vi_orth_key(alternative)
+    matches = [group for group in groups if isinstance(group, dict) and group.get("orth_key") == key]
+    if len(matches) != 1:
+        raise ValueError(f"Expected one VI orthographic group for promoted form {alternative!r}; found {len(matches)}")
+    group = matches[0]
+    display = group.get("display")
+    senses = group.get("n_senses_vi")
+    entries = group.get("n_vi_entries")
+    if not isinstance(display, str) or not isinstance(senses, list) or type(entries) is not int or entries != len(senses):
+        raise ValueError(f"Malformed VI orthographic group for promotion: {group!r}")
+    row["vi_canonical"] = display
+    row["vi_alts"] = [old, *(form for form in row["vi_alts"] if vi_orth_key(form) != key and vi_orth_key(form) != vi_orth_key(old))]
+    row["n_senses_vi"] = sum(senses)
+    row["n_vi_entries"] = entries
+    row["n_sources"] = int(group["n_sources"])
+    row["external_attested"] = bool(group["external_attested"])
+    row["loan_templates_found"] = group["loan_templates_found"]
+    row["canonical_promoted"] = True
+    row["vi_promoted_from"] = old
+    return old, display
 
 
 def clean_second_hop(value: str, *, pos: str) -> str:
@@ -310,6 +350,7 @@ def process_rows(rows: list[dict[str, Any]], *, translator: TranslationProvider,
 
     pass_by_id: dict[str, bool] = {}
     route_counts: Counter[str] = Counter()
+    promotions: list[dict[str, str]] = []
     en_hits = 0
     max_extra = int(config["bt"]["max_extra_syllables"])
     for row in ordered_rows:
@@ -318,16 +359,32 @@ def process_rows(rows: list[dict[str, Any]], *, translator: TranslationProvider,
         vi_back = list(dict.fromkeys(item for text in second_hop_texts[row["concept_id"]] for item in back_results[(code["en"], code["vi"], text)]))
         fwd_outs = forward_results[(code["en"], code["vi"], row["en_lemma"])]
         targets = [row["vi_canonical"], *row["vi_alts"]]
-        strict_pass, _ = pass_rule(row["vi_canonical"], row["vi_alts"], original_outputs, language="vi", pos=row["pos"], opencc=converter)
+        old_canonical = row["vi_canonical"]
+        alternatives = list(row["vi_alts"])
+        strict_pass, strict_match = pass_rule(old_canonical, alternatives, original_outputs, language="vi", pos=row["pos"], opencc=converter)
         rt_match, rt_output = containment_match(targets, vi_back, max_extra_syllables=max_extra)
         fwd_match, fwd_output = containment_match(targets, fwd_outs, max_extra_syllables=max_extra)
         route = "strict" if strict_pass else "rt_contain" if rt_match != "none" else "fwd_only" if fwd_match != "none" else "none"
         passed = route != "none"
         match = rt_match if rt_match != "none" else fwd_match
         matching_output = rt_output if rt_output is not None else fwd_output
-        top1_pass = bool(original_outputs and norm(original_outputs[0], language="vi", pos=row["pos"], opencc=converter) == norm(row["vi_canonical"], language="vi", pos=row["pos"], opencc=converter))
+        top1_pass = bool(original_outputs and norm(original_outputs[0], language="vi", pos=row["pos"], opencc=converter) == norm(old_canonical, language="vi", pos=row["pos"], opencc=converter))
         en_hit = norm(row["en_lemma"], language="en", pos=row["pos"], opencc=converter) in {norm(item, language="en", pos=row["pos"], opencc=converter) for item in en_outs}
-        row.update({"en_outs": en_outs, "vi_back": vi_back, "fwd_outs": fwd_outs, "bt_pass": passed, "bt_pass_strict_v1": strict_pass, "rt_contain": rt_match != "none", "fwd_hit": fwd_match != "none", "bt_route": route, "bt_matching_output": matching_output, "bt_match": match, "bt_pass_top1": top1_pass, "en_hit": en_hit})
+        row.update({
+            "en_outs": en_outs, "vi_back": vi_back, "fwd_outs": fwd_outs,
+            "bt_pass": passed, "bt_pass_strict_v1": strict_pass, "rt_contain": rt_match != "none",
+            "fwd_hit": fwd_match != "none", "bt_route": route, "bt_matching_output": matching_output,
+            "bt_match": match, "rt_match": rt_match, "fwd_match": fwd_match,
+            "bt_pass_top1": top1_pass, "en_hit": en_hit,
+            "canonical_promoted": False, "vi_promoted_from": None,
+        })
+        canonical_hit = any(contains(old_canonical, output, max_extra_syllables=max_extra) for output in [*vi_back, *fwd_outs])
+        promotion_match = alt_only_match(old_canonical, alternatives, vi_back, max_extra_syllables=max_extra)
+        if promotion_match is None:
+            promotion_match = alt_only_match(old_canonical, alternatives, fwd_outs, max_extra_syllables=max_extra)
+        if passed and not canonical_hit and promotion_match is not None:
+            old, new = promote_vi_alternative(row, promotion_match[0])
+            promotions.append({"concept_id": row["concept_id"], "en_lemma": row["en_lemma"], "old": old, "new": new})
         pass_by_id[row["concept_id"]] = passed
         route_counts[route] += 1
         en_hits += int(en_hit)
@@ -357,8 +414,168 @@ def process_rows(rows: list[dict[str, Any]], *, translator: TranslationProvider,
                 row[f"{language}_outs"] = None
                 row[f"{language}_nllb_agree"] = None
                 row[f"{language}_canonical_changed"] = None
-    info = {"pass_by_id": pass_by_id, "route_counts": route_counts, "en_hits": en_hits, "survivors": survivors}
+    info = {"pass_by_id": pass_by_id, "route_counts": route_counts, "en_hits": en_hits, "survivors": survivors, "promotions": promotions}
     return ordered_rows, {split: [row for row in ordered_rows if row["split"] == split] for split in SPLITS}, info
+
+
+def _postpromo_surface_norm(value: str, *, vietnamese: bool, config: dict[str, Any]) -> str:
+    """Apply the exact configured step-06 surface normalization to a form."""
+    result = strip_diacritics(normalize_nfc(value)).lower()
+    for character in config["remove_chars"]:
+        result = result.replace(character, "")
+    if vietnamese:
+        for source, target in sorted(config["vi_replace"].items(), key=lambda item: (-len(item[0]), item[0])):
+            result = result.replace(source, target)
+    return result
+
+
+def _counts(rows: list[dict[str, Any]]) -> Counter[str]:
+    """Count rows by part of speech for dropflow reporting."""
+    return Counter(row["pos"] for row in rows)
+
+
+def _postpromo_surface_distance(row: dict[str, Any], filters: dict[str, Any]) -> tuple[float, str, str, float]:
+    """Recompute step-06 min/raw surface distances for a promoted VI canonical."""
+    norm_config = filters["surface_norm"]
+    compare = [("en", row["en_lemma"])]
+    for language in ("fr", "id"):
+        candidates = row.get(f"{language}_cands")
+        if not isinstance(candidates, list):
+            raise ValueError(f"Promoted concept {row['concept_id']!r} has malformed {language}_cands")
+        seen: set[str] = set()
+        for candidate in candidates:
+            if not isinstance(candidate, dict) or not isinstance(candidate.get("word"), str):
+                raise ValueError(f"Promoted concept {row['concept_id']!r} has malformed {language} candidate")
+            word = normalize_nfc(candidate["word"].strip())
+            if not word:
+                raise ValueError(f"Promoted concept {row['concept_id']!r} has an empty {language} candidate")
+            key = word.casefold()
+            if key not in seen:
+                seen.add(key)
+                compare.append((language, word))
+    vi_norm = _postpromo_surface_norm(row["vi_canonical"], vietnamese=True, config=norm_config)
+    choices = []
+    for language_index, language in enumerate(("en", "fr", "id")):
+        for item_language, form in compare:
+            if item_language != language:
+                continue
+            candidate_norm = _postpromo_surface_norm(form, vietnamese=False, config=norm_config)
+            distance = normalized_levenshtein(vi_norm, candidate_norm)
+            raw_distance = normalized_levenshtein(
+                strip_diacritics(row["vi_canonical"]).lower(), strip_diacritics(form).lower(),
+            )
+            choices.append((distance, language_index, language, form, raw_distance))
+    if not choices:
+        raise ValueError(f"Promoted concept {row['concept_id']!r} has no surface-comparison candidates")
+    distance, _, language, form, raw_distance = min(choices)
+    return distance, language, form, raw_distance
+
+
+def _postpromo_deduplicate(rows: list[dict[str, Any]], field: str, zipf_cache: dict[str, float]) -> tuple[list[dict[str, Any]], list[tuple[str, str, str]]]:
+    """Apply step-06 attestation ranking to one split after canonical promotion."""
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        value = row["vi_canonical"] if field == "vi_canonical" else row["en_lemma"]
+        key = vi_orth_key(value) if field == "vi_canonical" else normalize_nfc(value).casefold()
+        groups[key].append(row)
+
+    def rank(row: dict[str, Any]) -> tuple[Any, ...]:
+        lemma = normalize_nfc(row["en_lemma"])
+        frequency = zipf_cache.setdefault(lemma, float(zipf_frequency(lemma, "en")))
+        return (-int(row["n_sources"]), -int(bool(row["external_attested"])), int(row["n_senses_vi"]), -frequency, row["concept_id"])
+
+    kept: list[dict[str, Any]] = []
+    actions: list[tuple[str, str, str]] = []
+    for key in sorted(groups):
+        ordered = sorted(groups[key], key=rank)
+        kept.append(ordered[0])
+        actions.extend((field, ordered[0]["concept_id"], row["concept_id"]) for row in ordered[1:])
+    return sorted(kept, key=lambda row: row["concept_id"]), actions
+
+
+def post_promotion_filters(
+    rows_by_split: dict[str, list[dict[str, Any]]],
+    *,
+    config: dict[str, Any],
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, dict[str, tuple[int, Counter[str], int, Counter[str]]]], list[tuple[str, str, str, str]]]:
+    """Reapply 3/4/4b/4c only to promoted forms, then deduplicate each whole split."""
+    filters = config["filters"]
+    threshold = float(filters["surface_edit_threshold"])
+    loan = filters["loanword"]
+    drop_codes = {str(code).casefold() for code in loan["drop_source_langs"]}
+    prefixes = [str(prefix).casefold() for prefix in loan["drop_source_lang_prefixes"]]
+    templates = set(loan["loan_templates"])
+    zipf_cache: dict[str, float] = {}
+    stage_names = ("filter3_polysemy", "filter4_surface", "filter4b_loanword", "filter4c_hyphen", "dedup_vi_form", "dedup_en_lemma")
+    flow: dict[str, dict[str, tuple[int, Counter[str], int, Counter[str]]]] = {}
+    final: dict[str, list[dict[str, Any]]] = {}
+    dedup_actions: list[tuple[str, str, str, str]] = []
+
+    for split in SPLITS:
+        current = [row for row in rows_by_split[split] if split == "directions" or row["bt_pass"]]
+        flow[split] = {}
+        for stage in stage_names[:4]:
+            before = current
+            kept = []
+            for row in before:
+                reject = False
+                if row["canonical_promoted"]:
+                    if stage == "filter3_polysemy":
+                        cutoff = row.get("polysemy_cutoff")
+                        if not isinstance(cutoff, (int, float)):
+                            raise ValueError(f"Promoted concept {row['concept_id']!r} lacks its step-06 polysemy cutoff")
+                        reject = int(row["n_senses_vi"]) > cutoff
+                    elif stage == "filter4_surface":
+                        distance, closest_lang, closest_form, raw_distance = _postpromo_surface_distance(row, filters)
+                        row.update({"min_surface_dist": distance, "closest_lang": closest_lang, "closest_form": closest_form, "raw_surface_dist": raw_distance})
+                        reject = distance < threshold
+                    elif stage == "filter4b_loanword":
+                        for item in row.get("loan_templates_found", []):
+                            source = str(item.get("source_lang", "")).casefold()
+                            template = item.get("template")
+                            if template in templates and (source in drop_codes or any(source.startswith(prefix) for prefix in prefixes)):
+                                reject = True
+                                break
+                    elif stage == "filter4c_hyphen":
+                        reject = "-" in row["vi_canonical"]
+                if reject:
+                    row["post_promotion_drop_reason"] = stage
+                else:
+                    kept.append(row)
+            current = kept
+            flow[split][stage] = (len(before), _counts(before), len(current), _counts(current))
+
+        before_vi = current
+        after_vi, vi_actions = _postpromo_deduplicate(before_vi, "vi_canonical", zipf_cache)
+        for _, kept_id, dropped_id in vi_actions:
+            next(row for row in before_vi if row["concept_id"] == dropped_id)["post_promotion_drop_reason"] = "dedup_vi_form"
+        flow[split]["dedup_vi_form"] = (len(before_vi), _counts(before_vi), len(after_vi), _counts(after_vi))
+        before_en = after_vi
+        after_en, en_actions = _postpromo_deduplicate(before_en, "en_lemma", zipf_cache)
+        for _, kept_id, dropped_id in en_actions:
+            next(row for row in before_en if row["concept_id"] == dropped_id)["post_promotion_drop_reason"] = "dedup_en_lemma"
+        flow[split]["dedup_en_lemma"] = (len(before_en), _counts(before_en), len(after_en), _counts(after_en))
+        final[split] = after_en
+        dedup_actions.extend((split, *action) for action in (*vi_actions, *en_actions))
+
+    included_ids = {row["concept_id"] for split in SPLITS for row in final[split]}
+    seen: dict[str, dict[str, str]] = {"concept_id": {}, "vi": {}, "en": {}}
+    for split in SPLITS:
+        for row in final[split]:
+            terms = {
+                "concept_id": row["concept_id"],
+                "vi": vi_orth_key(row["vi_canonical"]),
+                "en": normalize_nfc(row["en_lemma"]).casefold(),
+            }
+            for field, value in terms.items():
+                previous = seen[field].setdefault(value, split)
+                if previous != split:
+                    raise AssertionError(f"Post-promotion {field} collision across splits: {value!r} in {previous!r}/{split!r}")
+    for split_rows in rows_by_split.values():
+        for row in split_rows:
+            row.setdefault("post_promotion_drop_reason", None)
+            row["post_promotion_survives"] = row["concept_id"] in included_ids
+    return final, flow, dedup_actions
 
 
 def choose_device() -> torch.device:
@@ -393,6 +610,9 @@ def _output_schema(schema: pa.Schema) -> pa.Schema:
         pa.field("bt_pass_strict_v1", pa.bool_()), pa.field("rt_contain", pa.bool_()),
         pa.field("fwd_hit", pa.bool_()), pa.field("bt_route", pa.string()),
         pa.field("bt_matching_output", pa.string()), pa.field("fwd_outs", pa.list_(pa.string())),
+        pa.field("rt_match", pa.string()), pa.field("fwd_match", pa.string()),
+        pa.field("canonical_promoted", pa.bool_()), pa.field("vi_promoted_from", pa.string()),
+        pa.field("post_promotion_survives", pa.bool_()), pa.field("post_promotion_drop_reason", pa.string()),
         pa.field("bt_pass_top1", pa.bool_()), pa.field("en_hit", pa.bool_()),
     ]
     for language in ("zh", "fr", "id"):
@@ -451,7 +671,7 @@ def run(config_path: str) -> dict[str, Any]:
             raise ValueError("backtranslate.bt.max_extra_syllables must be a non-negative integer")
         input_path = Path(settings["paths"]["input"])
         table = pq.read_table(input_path)
-        required = {"concept_id", "en_lemma", "pos", "split", "vi_canonical", "vi_alts", "zh_canonical", "zh_alts", "fr_canonical", "fr_alts", "id_canonical", "id_alts"}
+        required = {"concept_id", "en_lemma", "pos", "split", "vi_canonical", "vi_alts", "vi_variants", "polysemy_cutoff", "n_senses_vi", "n_sources", "external_attested", "loan_templates_found", "fr_cands", "id_cands", "zh_canonical", "zh_alts", "fr_canonical", "fr_alts", "id_canonical", "id_alts"}
         missing = sorted(required - set(table.column_names))
         if missing:
             raise ValueError(f"Step-06 parquet is missing required columns: {missing}")
@@ -473,6 +693,7 @@ def run(config_path: str) -> dict[str, Any]:
         logger.info("Pinned NLLB: %s@%s", nllb["model"], nllb["revision"])
         translator = NLLBTranslator(nllb, device, logger)
         processed, rows_by_split, info = process_rows(rows, translator=translator, config=nllb, logger=logger)
+        final_by_split, post_flow, post_dedup_actions = post_promotion_filters(rows_by_split, config=config)
 
         dropflow_path = Path(config["paths"]["dropflow"])
         _without_step_dropflow(dropflow_path, "07")
@@ -483,6 +704,10 @@ def run(config_path: str) -> dict[str, Any]:
             by_pos = Counter(row["pos"] for row in after)
             flow.record(step="07", stage=f"filter2_backtranslation_{split}", unit="concepts", n_in=len(before), n_out=len(after), n_out_by_pos=dict(sorted(by_pos.items())))
             logger.info("filter2_backtranslation_%s | n_in=%d | n_out=%d | n_out_by_pos=%s", split, len(before), len(after), json.dumps(dict(sorted(by_pos.items())), sort_keys=True))
+            for stage in ("filter3_polysemy", "filter4_surface", "filter4b_loanword", "filter4c_hyphen", "dedup_vi_form", "dedup_en_lemma"):
+                n_in, _, n_out, out_pos = post_flow[split][stage]
+                flow.record(step="07", stage=f"{stage}_{split}_post_promotion", unit="concepts", n_in=n_in, n_out=n_out, n_out_by_pos=dict(sorted(out_pos.items())))
+                logger.info("%s_%s_post_promotion | n_in=%d | n_out=%d | n_out_by_pos=%s", stage, split, n_in, n_out, json.dumps(dict(sorted(out_pos.items())), sort_keys=True))
 
         test_rows = rows_by_split["test"]
         logger.info("TEST filter-2 rates by POS x syllable bucket (denominator = concepts):")
@@ -496,6 +721,11 @@ def run(config_path: str) -> dict[str, Any]:
             logger.info("%s | %s | n=%d | strict_v1=%.6f | rt_contain=%.6f | fwd_hit=%.6f | bt_pass=%.6f", pos, bucket, n, rates["strict_v1"], rates["rt_contain"], rates["fwd_hit"], rates["bt_pass"])
 
         logger.info("bt_route distribution: %s", json.dumps(dict(sorted(info["route_counts"].items())), sort_keys=True))
+        logger.info("Canonical promotions: %d", len(info["promotions"]))
+        logger.info("Canonical promotion examples (old -> new | en):")
+        for item in sorted(info["promotions"], key=lambda value: (value["concept_id"], value["old"], value["new"]))[:int(report["promotion_examples_n"])]:
+            logger.info("%s -> %s | %s", item["old"], item["new"], item["en_lemma"])
+        logger.info("Post-promotion dedup removals: vi_form=%d | en_lemma=%d", sum(item[1] == "vi_canonical" for item in post_dedup_actions), sum(item[1] == "en_lemma" for item in post_dedup_actions))
         total = len(processed)
         logger.info("en_hit rate: %d/%d (%.6f)", info["en_hits"], total, info["en_hits"] / total if total else 0.0)
         newly_passed = [row for row in test_rows if row["bt_pass"] and not row["bt_pass_strict_v1"]]
@@ -545,13 +775,25 @@ def run(config_path: str) -> dict[str, Any]:
             old = original_canonicals[row["concept_id"]][language]
             logger.info("%s | %s | %s -> %s", row["en_lemma"], language, old, row[f"{language}_canonical"])
 
+        final_test_strata = Counter((row["pos"], syllable_bucket(row["vi_canonical"], edges)) for row in final_by_split["test"])
+        logger.info("Final TEST size after filter 2 and post-promotion rechecks by POS x syllable bucket:")
+        for (pos, bucket), count in sorted(final_test_strata.items()):
+            logger.info("%s | %s | %d", pos, bucket, count)
+        logger.info("Final TEST concepts: %d", len(final_by_split["test"]))
+
+        final_rows = sorted(
+            (row for split in SPLITS for row in final_by_split[split]),
+            key=lambda row: row["concept_id"],
+        )
+        if any(row.get("post_promotion_survives") is not True for row in final_rows):
+            raise AssertionError("Step-07 output selection includes a concept that did not survive post-promotion checks")
         output_path = Path(settings["paths"]["output"])
-        _write_parquet(processed, _output_schema(table.schema), output_path, int(config["split"]["parquet_row_group_size"]))
-        logger.info("Output: %s (%d concepts)", output_path, len(processed))
+        _write_parquet(final_rows, _output_schema(table.schema), output_path, int(config["split"]["parquet_row_group_size"]))
+        logger.info("Output: %s (%d surviving concepts across all splits)", output_path, len(final_rows))
         logger.info("Translation calls=%d; generation batches=%d; cache hits=%d; in-memory duplicate requests=%d", translator.translation_calls, translator.generation_batches, translator.cache_hits, translator.in_memory_reuses)
         runtime = time.monotonic() - started
         logger.info("Runtime seconds: %.3f", runtime)
-        return {"rows": processed, "info": info, "translation_calls": translator.translation_calls, "cache_hits": translator.cache_hits, "runtime_seconds": runtime}
+        return {"rows": final_rows, "final_by_split": final_by_split, "info": info, "translation_calls": translator.translation_calls, "cache_hits": translator.cache_hits, "runtime_seconds": runtime}
     except Exception:
         logger.exception("Step 07 failed")
         raise
