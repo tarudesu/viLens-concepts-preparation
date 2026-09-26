@@ -209,6 +209,9 @@ downloads:
     fasttext_url: https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin
     test_text: Tôi đang học tiếng Việt
     top_k: 1
+  wordnet:
+    corpus: wordnet
+    directory: nltk_data
 
 models:
   gemma:

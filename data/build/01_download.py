@@ -32,7 +32,7 @@ from common import DataConfigError, load_config, normalize_nfc, setup_logging
 TABLE_HEADER = ("source", "file", "URL", "retrieved UTC", "bytes", "SHA-256", "version/commit/extraction date", "license")
 SOURCE_NAMES = (
     "wiktextract_en", "wiktextract_vi", "muse", "unihan", "cedict",
-    "brysbaert", "flores", "nllb", "lid", "gated",
+    "brysbaert", "flores", "nllb", "lid", "wordnet", "gated",
 )
 
 
@@ -126,6 +126,8 @@ def parse_sources(text: str) -> list[SourceRecord]:
     for line in lines[header_index + 2:]:
         if not line.strip():
             continue
+        if not line.startswith("|"):
+            break
         values = cells(line)
         if len(values) != len(TABLE_HEADER):
             raise ValueError(f"Malformed SOURCES.md row: {line}")
@@ -134,11 +136,21 @@ def parse_sources(text: str) -> list[SourceRecord]:
 
 
 def write_sources(path: str | Path, records: Iterable[SourceRecord]) -> None:
-    """Atomically rewrite SOURCES.md, preserving rows for other sources."""
+    """Rewrite the provenance table while preserving any trailing source notes."""
 
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     text = render_sources(records)
+    if target.exists():
+        old_lines = target.read_text(encoding="utf-8").splitlines()
+        header_index = next((i for i, line in enumerate(old_lines) if line.startswith("| ")), None)
+        if header_index is not None:
+            cursor = header_index + 2
+            while cursor < len(old_lines) and (not old_lines[cursor].strip() or old_lines[cursor].startswith("|")):
+                cursor += 1
+            notes = "\n".join(old_lines[cursor:]).strip("\n")
+            if notes:
+                text = text.rstrip("\n") + "\n\n" + notes + "\n"
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", newline="\n", dir=target.parent, prefix=".sources-", delete=False) as handle:
         temporary = Path(handle.name)
         handle.write(text)
@@ -671,6 +683,77 @@ def run_lid(config, session, root, records, sources_path, logger, config_path: P
     logger.info("GlotLID top-1: %s; fastText lid.176 top-1: %s", glot_label, lid_label)
 
 
+def wordnet_version_string(nltk_version: str, wordnet_version: str) -> str:
+    """Format the package and corpus versions recorded for the WordNet source."""
+
+    if not nltk_version.strip() or not wordnet_version.strip():
+        raise ValueError("NLTK and WordNet versions must be non-empty")
+    return f"NLTK {nltk_version}; WordNet {wordnet_version}"
+
+
+def run_wordnet(config, root, records, sources_path, logger) -> None:
+    """Download and provenance-record NLTK's WordNet archive under data/raw."""
+
+    import nltk
+    from nltk.corpus import wordnet
+    from nltk.downloader import Downloader
+
+    settings = config["downloads"]["wordnet"]
+    corpus_id = settings["corpus"]
+    if corpus_id != "wordnet":
+        raise DataConfigError(f"downloads.wordnet.corpus must be 'wordnet'; got {corpus_id!r}")
+    data_dir = root / settings["directory"]
+    archive = data_dir / "corpora" / "wordnet.zip"
+    repo_root = root.parent.parent
+    relative = archive.resolve().relative_to(repo_root.resolve()).as_posix()
+    existing = records.get(relative)
+    package_url: str
+    if skip_if_hash_matches(archive, existing, config["downloads"]["chunk_size_bytes"]):
+        logger.info("Verified and skipped frozen WordNet archive %s", relative)
+        retrieved = existing.retrieved_utc  # type: ignore[union-attr]
+        package_url = existing.url  # type: ignore[union-attr]
+    else:
+        if existing is not None:
+            raise FrozenSourceError(f"SOURCES.md has a row for missing frozen WordNet archive {relative}")
+        if archive.exists():
+            raise FrozenSourceError(f"WordNet archive exists without a SOURCES.md hash; refusing overwrite: {archive}")
+        data_dir.mkdir(parents=True, exist_ok=True)
+        package = Downloader().info(corpus_id)
+        if not package.url:
+            raise SourceError("NLTK package metadata did not provide a WordNet download URL")
+        package_url = package.url
+        retrieved = utc_now()
+        if not nltk.download(corpus_id, download_dir=str(data_dir), quiet=True, raise_on_error=True):
+            raise SourceError("NLTK downloader returned failure for the WordNet corpus")
+        if not archive.is_file():
+            raise SourceError(f"NLTK reported WordNet installed but archive is missing: {archive}")
+
+    nltk.data.path = [str(data_dir.resolve())]
+    try:
+        wordnet.ensure_loaded()
+        wordnet_version = wordnet.get_version()
+        # Confirm the installed corpus can answer a normal lexical query.
+        wordnet.synsets("entity")
+    except LookupError as exc:
+        raise SourceError(f"Downloaded WordNet cannot be loaded from {data_dir}: {exc}") from exc
+    version = wordnet_version_string(nltk.__version__, wordnet_version)
+    if existing is not None:
+        if existing.version != version:
+            raise FrozenSourceError(
+                f"Frozen WordNet version mismatch for {relative}: SOURCES.md={existing.version!r}, installed={version!r}"
+            )
+        logger.info("WordNet already recorded: %s", version)
+        return
+
+    record = source_record(
+        "wordnet", archive, repo_root, package_url,
+        retrieved, version, "WordNet License", config["downloads"]["chunk_size_bytes"],
+    )
+    records[record.file] = record
+    write_sources(sources_path, records.values())
+    logger.info("Downloaded and verified WordNet archive %s (%s)", record.file, version)
+
+
 def run_gated(config, logger) -> None:
     """Check Gemma and Llama access using repository metadata only."""
 
@@ -730,6 +813,7 @@ def run_step(args: argparse.Namespace) -> int:
         "flores": lambda: run_flores(config, session, source_root, records, source_path, logger, config_path),
         "nllb": lambda: run_nllb(config, session, source_root, records, source_path, logger, config_path),
         "lid": lambda: run_lid(config, session, source_root, records, source_path, logger, config_path),
+        "wordnet": lambda: run_wordnet(config, source_root, records, source_path, logger),
         "gated": lambda: run_gated(config, logger),
     }
     selected = [args.only] if args.only else list(SOURCE_NAMES)

@@ -14,6 +14,7 @@ FrozenSourceError = download.FrozenSourceError
 parse_sources = download.parse_sources
 render_sources = download.render_sources
 skip_if_hash_matches = download.skip_if_hash_matches
+wordnet_version_string = download.wordnet_version_string
 
 
 def test_sources_table_round_trips_and_sorts(tmp_path: Path) -> None:
@@ -29,6 +30,21 @@ def test_sources_table_round_trips_and_sorts(tmp_path: Path) -> None:
     assert parse_sources(output.read_text(encoding="utf-8")) == sorted(records, key=lambda record: (record.source, record.file))
 
 
+def test_sources_writer_preserves_trailing_provenance_notes(tmp_path: Path) -> None:
+    record = SourceRecord("fixture", "data/raw/x", "https://example.org/x", "2026-09-25T00:00:00Z", "1", "a" * 64, "v1", "test")
+    output = tmp_path / "SOURCES.md"
+    output.write_text(
+        render_sources([record]) + "\nQuery date: 2026-09-25 UTC.\n\nA second note.\n",
+        encoding="utf-8",
+    )
+
+    download.write_sources(output, [record])
+
+    rewritten = output.read_text(encoding="utf-8")
+    assert rewritten.endswith("\n\nQuery date: 2026-09-25 UTC.\n\nA second note.\n")
+    assert parse_sources(rewritten) == [record]
+
+
 def test_skip_if_hash_matches_checks_a_tiny_file(tmp_path: Path) -> None:
     path = tmp_path / "tiny.txt"
     payload = b"tiny source\n"
@@ -41,3 +57,9 @@ def test_skip_if_hash_matches_checks_a_tiny_file(tmp_path: Path) -> None:
     path.write_bytes(b"changed\n")
     with pytest.raises(FrozenSourceError, match="hash mismatch"):
         skip_if_hash_matches(path, record, 4)
+
+
+def test_wordnet_version_string_records_both_versions() -> None:
+    assert wordnet_version_string("3.10.3", "3.0") == "NLTK 3.10.3; WordNet 3.0"
+    with pytest.raises(ValueError, match="versions must be non-empty"):
+        wordnet_version_string("3.10.3", " ")
