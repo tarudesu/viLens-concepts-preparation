@@ -239,6 +239,24 @@ tokens:
     output: data/interim/10_tok.parquet
     tokenizer_cache: data/raw/hf_tokenizers
 
+covariates:
+  pending_concreteness_label: pending
+  paths:
+    input: data/interim/08_etym.parquet
+    output: data/interim/09_cov.parquet
+
+diacritics:
+  wordfreq_top_n: 50000 # wordfreq returns its complete Vietnamese vocabulary (10,622 entries)
+  max_collapse_partners: 3
+  report_examples_n: 20
+  paths:
+    input: data/interim/10_tok.parquet
+    output: data/interim/11_diac.parquet
+    vietnamese_dump: data/raw/wiktextract_vi/kaikki.org-dictionary-Vietnamese.jsonl
+
+release:
+  require_resolved_concreteness: true
+
 inspection:
   english_vietnamese_n: 40
   english_pretty_n: 5

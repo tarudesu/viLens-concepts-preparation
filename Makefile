@@ -14,7 +14,7 @@ ifneq ($(words $(STEP_NUMBERS)),$(words $(sort $(STEP_NUMBERS))))
 $(error Expected exactly one script per step in $(BUILD_DIR))
 endif
 
-.PHONY: all download pool attest split filter backtranslate etymology tokens test $(STEP_TARGETS)
+.PHONY: all download pool attest split filter backtranslate etymology covariates tokens diacritics test $(STEP_TARGETS)
 # Steps consume previous steps' outputs, including when called with make -j.
 .NOTPARALLEL:
 
@@ -37,7 +37,11 @@ backtranslate: step-07
 
 etymology: step-08
 
+covariates: step-09
+
 tokens: step-10
+
+diacritics: step-11
 
 test:
 	$(PYTHON) -B -m pytest
