@@ -227,6 +227,38 @@ def test_14_structured_fewshot_metadata_release_projection_and_tsv(tmp_path: Pat
     assert "concept_id\tsplit\tvi\ten" in rendered
 
 
+def test_14_joins_resolved_concreteness_from_step11_tables(tmp_path: Path) -> None:
+    step = load_script("14_release.py")
+    main_path = tmp_path / "11_diac.parquet"
+    extension_path = tmp_path / "11_m1_ext.parquet"
+    pq.write_table(pa.table({
+        "concept_id": ["main-a", "main-b"],
+        "concreteness": [4.2, None],
+        "concreteness_match": ["exact", "none"],
+        "m1_extension": [False, False],
+    }), main_path)
+    pq.write_table(pa.table({
+        "concept_id": ["ext-a"],
+        "concreteness": [3.7],
+        "concreteness_match": ["head"],
+        "m1_extension": [True],
+    }), extension_path)
+    stale_rows = [
+        {"concept_id": "main-a", "m1_extension": False, "concreteness": None, "concreteness_match": "pending"},
+        {"concept_id": "main-b", "m1_extension": False, "concreteness": None, "concreteness_match": "pending"},
+        {"concept_id": "ext-a", "m1_extension": True, "concreteness": None, "concreteness_match": "pending"},
+    ]
+
+    rows, counts = step.attach_resolved_concreteness(stale_rows, main_path, extension_path)
+
+    assert [(row["concreteness"], row["concreteness_match"]) for row in rows] == [
+        (4.2, "exact"), (None, "none"), (3.7, "head"),
+    ]
+    assert counts == {"exact": 1, "head": 1, "none": 1}
+    with pytest.raises(ValueError, match="do not exactly match"):
+        step.attach_resolved_concreteness(stale_rows[:-1], main_path, extension_path)
+
+
 def test_14_latest_dropflow_retains_latest_contiguous_step_run(tmp_path: Path) -> None:
     step = load_script("14_release.py")
     path = tmp_path / "dropflow.jsonl"
@@ -251,6 +283,8 @@ def test_14_pending_guard_and_missing_input_message(tmp_path: Path) -> None:
 def test_14_release_input_refuses_pending_concreteness(tmp_path: Path) -> None:
     step = load_script("14_release.py")
     input_path = tmp_path / "12_ru.parquet"
+    main_concreteness = tmp_path / "11_diac.parquet"
+    extension_concreteness = tmp_path / "11_m1_ext.parquet"
     row = {
         "concept_id": "fixture", "split": "test", "vi_canonical": "mèo", "en_lemma": "cat",
         "zh_canonical": "猫", "fr_canonical": "chat", "id_canonical": "kucing", "pos": "noun",
@@ -262,13 +296,24 @@ def test_14_release_input_refuses_pending_concreteness(tmp_path: Path) -> None:
         "han_verifications": [],
     }
     pq.write_table(pa.Table.from_pylist([row]), input_path)
+    pq.write_table(pa.table({
+        "concept_id": ["fixture"], "concreteness": [None],
+        "concreteness_match": ["pending"], "m1_extension": [False],
+    }), main_concreteness)
+    pq.write_table(pa.table({
+        "concept_id": pa.array([], type=pa.string()), "concreteness": pa.array([], type=pa.float64()),
+        "concreteness_match": pa.array([], type=pa.string()), "m1_extension": pa.array([], type=pa.bool_()),
+    }), extension_concreteness)
     release_paths = {name: str(tmp_path / name) for name in (
         "input", "dropflow", "sources", "protocol", "output_tsv", "agreement", "licenses",
         "qa_sample", "fertility", "flores_directions", "prompts_dir", "logs_dir",
     )}
     release_paths["input"] = str(input_path)
-    config = {"release": {"paths": release_paths}}
-    with pytest.raises(ValueError, match="Refusing final dataset assembly: concreteness_match is pending"):
+    config = {
+        "release": {"paths": release_paths},
+        "concreteness": {"paths": {"main_input": str(main_concreteness), "extension_input": str(extension_concreteness)}},
+    }
+    with pytest.raises(ValueError, match="unresolved concreteness_match='pending'"):
         step._read_latest_inputs(config, logger=logging.getLogger("fixture-release"))
 
 

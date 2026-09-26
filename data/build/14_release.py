@@ -324,6 +324,62 @@ def _ratio(numerator: int, denominator: int) -> str:
     return f"{numerator}/{denominator} ({numerator / denominator:.4f})" if denominator else "0/0 (NA)"
 
 
+def attach_resolved_concreteness(
+    rows: list[dict[str, Any]], main_path: Path, extension_path: Path,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Join step-09b scores from the step-11 tables onto step-12 release rows."""
+    resolved: dict[str, tuple[float | None, str, bool]] = {}
+    allowed_matches = {"exact", "head", "none"}
+    for path, expected_extension in ((main_path, False), (extension_path, True)):
+        if not path.is_file():
+            raise FileNotFoundError(f"Step 14 requires resolved step-11 concreteness input: missing {path}")
+        table = pq.read_table(path)
+        required = {"concept_id", "concreteness", "concreteness_match", "m1_extension"}
+        missing = sorted(required - set(table.column_names))
+        if missing:
+            raise ValueError(f"Resolved concreteness table {path} lacks columns: {missing!r}")
+        for item in table.to_pylist():
+            concept_id = item.get("concept_id")
+            match = item.get("concreteness_match")
+            extension_flag = item.get("m1_extension")
+            if not isinstance(concept_id, str) or not concept_id:
+                raise ValueError(f"Resolved concreteness table {path} has a missing concept_id")
+            if concept_id in resolved:
+                raise ValueError(f"Concept {concept_id!r} occurs in both step-11 concreteness tables")
+            if extension_flag is not expected_extension:
+                raise ValueError(
+                    f"Concept {concept_id!r} has m1_extension={extension_flag!r} in {path}; "
+                    f"expected {expected_extension!r}"
+                )
+            if match not in allowed_matches:
+                raise ValueError(f"Concept {concept_id!r} has unresolved concreteness_match={match!r} in {path}")
+            resolved[concept_id] = (item.get("concreteness"), match, expected_extension)
+
+    input_ids = {row.get("concept_id") for row in rows}
+    resolved_ids = set(resolved)
+    if input_ids != resolved_ids:
+        missing = sorted(input_ids - resolved_ids)[:10]
+        extra = sorted(resolved_ids - input_ids)[:10]
+        raise ValueError(
+            "Step-11 concreteness IDs do not exactly match step-12 release IDs: "
+            f"missing (up to 10)={missing!r}, extra (up to 10)={extra!r}"
+        )
+    counts: dict[str, int] = {}
+    updated: list[dict[str, Any]] = []
+    for row in rows:
+        record = dict(row)
+        value, match, extension_flag = resolved[record["concept_id"]]
+        if record.get("m1_extension") is not extension_flag:
+            raise ValueError(
+                f"Step-11 and step-12 m1_extension disagree for concept {record['concept_id']!r}"
+            )
+        record["concreteness"] = value
+        record["concreteness_match"] = match
+        counts[match] = counts.get(match, 0) + 1
+        updated.append(record)
+    return updated, dict(sorted(counts.items()))
+
+
 def _load_step_module(step_file: str) -> Any:
     """Load an adjacent pipeline module for shared, audited calculations."""
     module_path = Path(__file__).resolve().parent / step_file
@@ -608,6 +664,11 @@ def _read_latest_inputs(config: dict[str, Any], logger: logging.Logger) -> tuple
     ids = [row.get("concept_id") for row in rows]
     if any(not isinstance(value, str) or not value for value in ids) or len(ids) != len(set(ids)):
         raise ValueError("Step-12 enriched input has missing or duplicate concept_id values")
+    concreteness_paths = config["concreteness"]["paths"]
+    rows, concreteness_counts = attach_resolved_concreteness(
+        rows, Path(concreteness_paths["main_input"]), Path(concreteness_paths["extension_input"]),
+    )
+    logger.info("Attached resolved step-11 concreteness to release rows: %s", concreteness_counts)
     require_resolved_concreteness(rows)
     required_base = {"concept_id", "split", "vi_canonical", "en_lemma", "zh_canonical", "fr_canonical", "id_canonical",
                      "pos", "sense_gloss", "stratum", "signal_a", "signal_b", "signal_b_strict",
