@@ -229,6 +229,16 @@ models:
     hf_id: meta-llama/Llama-3.2-3B-Instruct
     revision: 0cb88a4f764b7a12671c53f0838cd831a0843b95
 
+tokens:
+  context_prefix: "x:"
+  use_fast: true
+  e1_gate_share_threshold: 0.60
+  m1_min_single_token_n: 150
+  paths:
+    input: data/interim/08_etym.parquet
+    output: data/interim/10_tok.parquet
+    tokenizer_cache: data/raw/hf_tokenizers
+
 inspection:
   english_vietnamese_n: 40
   english_pretty_n: 5
