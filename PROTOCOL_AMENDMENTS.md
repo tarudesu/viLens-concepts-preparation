@@ -40,3 +40,9 @@ v1.2 (2026-09-26; pre-data; no model outputs exist at the time of this amendment
   character entries for readings (Unihan kVietnamese coverage gaps); Signal B is
   therefore only partly independent of Signal A. No further changes to the
   etymology rules will be made.
+- E1 tokenizer audit (no model weights loaded): single-token Vietnamese coverage
+  is 7.0% (Gemma), 6.3% (Qwen), 6.3% (Llama); all single-token items are
+  monosyllabic. M1 adequacy (≥150) is not met by the main set. Planned remedy (main
+  dataset unchanged): an M1-only extension set of monosyllabic concepts with
+  exactly 2 senses that pass all other filters, used solely for the M1-vs-M2
+  comparison (C1).
