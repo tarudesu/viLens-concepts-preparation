@@ -87,3 +87,13 @@ SHA-256 manifest for all package files uploaded in that commit:
 | `scripts/build_flores_directions.py` | 6288 | 67c36e05301a56ec34ad6bf857545cca545a5ec329c8b461d7a9984994dc76c8 |
 
 The Hugging Face dataset repository also contains a platform-generated `.gitattributes` file (not part of the uploaded package directory): 2504 bytes, SHA-256 `9e75dd981de037ec3769f24f790e126bc5a160b6871f510214e68dc70649aeeb`.
+
+## Archive (v1.2-data)
+
+The private GitHub release `v1.2-data` contains these zstd level-19 archives. Each archive was listed and its file-entry count matched the corresponding source directories before upload. No archive exceeded 1.9 GB, so no parts were needed. SHA-256 values are also recorded in `docs/data-archive/SHA256SUMS`.
+
+| asset | bytes | SHA-256 | contents |
+|---|---:|---|---|
+| `viLens-cache-v1.2.tar.zst` | 5560727 | `8b599f2091b30b7f8993a6161e03e7ae5e323d8f41a8a999258d40a54b7856f3` | `data/raw/wikidata_cache/` (4,492 entries) and `data/raw/nllb_translation_cache/` (26,635 entries); 31,127 file entries total |
+| `viLens-raw-small-v1.2.tar.zst` | 41288545 | `35572c1e451902af6a4754b3e947b6e0428f167ee4d3f6f0d12db45e41b42752` | `brysbaert/`, `cedict/`, `muse/`, `unihan/`, `nltk_data/`, `flores/`, and `hf_tokenizers/`; 81 file and symlink entries total |
+| `viLens-raw-wiktextract-v1.2.tar.zst` | 313942867 | `a2e98cd46731046582295f6a0690d3bb95190fead53f8847faac3d6a6827d55b` | English and Vietnamese Wiktextract JSONL dumps; 2 file entries |

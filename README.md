@@ -53,3 +53,13 @@ use a local `numpy.random.default_rng(config["seed"])` without changing global
 random state. Add dependencies with `uv`, commit `uv.lock`, and test every pure
 function, including normalization, edit distance, diacritic stripping, and
 matching rules as those functions are introduced.
+
+## Reproduce the data
+
+1. Install the locked dependencies with `uv sync`.
+2. Authenticate GitHub CLI for this private repository with `gh auth login -s repo`, then run `scripts/restore_raw.sh`. The script downloads the `v1.2-data` release assets, verifies them against `docs/data-archive/SHA256SUMS`, and restores the archived sources and caches under `data/raw/`.
+3. The archive omits the language-identification models and NLLB model weights. Re-download them with `uv run python data/build/01_download.py --config configs/data.yaml --only lid` and `uv run python data/build/01_download.py --config configs/data.yaml --only nllb`. They are needed only for language identification and translations missing from the cached responses.
+4. Rebuild with `make -o step-01 all`.
+5. Check all 50 generated artifacts with `sha256sum -c docs/data-archive/BUILD_OUTPUTS.sha256` (Linux) or `shasum -a 256 -c docs/data-archive/BUILD_OUTPUTS.sha256` (macOS). Also compare the `data/concepts.tsv` SHA-256 with the frozen value in `PREREG.md`. The archive asset hashes are recorded in `docs/data-archive/SHA256SUMS`.
+
+Hugging Face and GitHub tokens are never stored in this repository. Use the relevant CLI credential store or environment variables for authenticated downloads.
