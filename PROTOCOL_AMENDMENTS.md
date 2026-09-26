@@ -33,3 +33,10 @@ v1.2 (2026-09-26; pre-data; no model outputs exist at the time of this amendment
   single-token subset is assessed at the E1 gate (minimum 150 items per model).
 - zh/fr/id NLLB agreement flags are robustness variables, not filters.
   Pre-declared robustness subset: all three agree.
+- Checkpoint C outcome: primary κ(A,B) = 0.594, 95% CI [0.557, 0.631]; Holm-level
+  MDE (sino vs nonsino, test) = 0.206. Under the pre-committed rule, H3 is
+  EXPLORATORY. Strata frozen with the primary Signal B (test: sino 481, nonsino 706,
+  ambiguous 347 excluded from H3). 25.8% of verified Han strings used Wiktionary
+  character entries for readings (Unihan kVietnamese coverage gaps); Signal B is
+  therefore only partly independent of Signal A. No further changes to the
+  etymology rules will be made.
