@@ -452,11 +452,16 @@ def run_brysbaert(config, session, root, records, sources_path, logger) -> None:
         for path in local_files:
             rel = path.resolve().relative_to(root.parent.parent.resolve()).as_posix()
             old = records.get(rel)
-            if skip_if_hash_matches(path, old, config["downloads"]["chunk_size_bytes"]):
-                continue
             if old is not None:
+                if skip_if_hash_matches(path, old, config["downloads"]["chunk_size_bytes"]):
+                    continue
                 raise FrozenSourceError(f"Manually supplied Brysbaert file conflicts with SOURCES.md: {rel}")
-            record = source_record("brysbaert", path, root.parent.parent, "manual download; see " + settings["manual_url"], "unknown (file supplied before retrieval was recorded)", "Brysbaert, Warriner & Kuperman (2014)", "License/terms not stated in local file; check publisher terms before redistribution", config["downloads"]["chunk_size_bytes"])
+            record = source_record(
+                "brysbaert", path, root.parent.parent, settings["manual_url"], utc_now(),
+                "Brysbaert, Warriner & Kuperman (2014), BRM, doi 10.3758/s13428-013-0403-5, supplementary material ESM1",
+                "as distributed with the article; check terms before redistributing values",
+                config["downloads"]["chunk_size_bytes"],
+            )
             records[rel] = record
         write_sources(sources_path, records.values())
         logger.info("Hashed %s manually supplied Brysbaert file(s)", len(local_files))
@@ -470,11 +475,16 @@ def run_brysbaert(config, session, root, records, sources_path, logger) -> None:
     for path in sorted(item for item in directory.iterdir() if item.is_file() and not item.name.startswith(".")):
         rel = path.resolve().relative_to(root.parent.parent.resolve()).as_posix()
         old = records.get(rel)
-        if skip_if_hash_matches(path, old, config["downloads"]["chunk_size_bytes"]):
-            continue
         if old is not None:
+            if skip_if_hash_matches(path, old, config["downloads"]["chunk_size_bytes"]):
+                continue
             raise FrozenSourceError(f"Brysbaert file conflicts with SOURCES.md: {rel}")
-        records[rel] = source_record("brysbaert", path, root.parent.parent, "manual download; see " + settings["manual_url"], "unknown", "Brysbaert, Warriner & Kuperman (2014)", "License/terms must be verified before redistribution", config["downloads"]["chunk_size_bytes"])
+        records[rel] = source_record(
+            "brysbaert", path, root.parent.parent, settings["manual_url"], utc_now(),
+            "Brysbaert, Warriner & Kuperman (2014), BRM, doi 10.3758/s13428-013-0403-5, supplementary material ESM1",
+            "as distributed with the article; check terms before redistributing values",
+            config["downloads"]["chunk_size_bytes"],
+        )
     write_sources(sources_path, records.values())
 
 

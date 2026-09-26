@@ -3,6 +3,7 @@
 from pathlib import Path
 import hashlib
 from importlib import import_module
+import logging
 import sys
 
 import pytest
@@ -15,6 +16,7 @@ parse_sources = download.parse_sources
 render_sources = download.render_sources
 skip_if_hash_matches = download.skip_if_hash_matches
 wordnet_version_string = download.wordnet_version_string
+run_brysbaert = download.run_brysbaert
 
 
 def test_sources_table_round_trips_and_sorts(tmp_path: Path) -> None:
@@ -63,3 +65,30 @@ def test_wordnet_version_string_records_both_versions() -> None:
     assert wordnet_version_string("3.10.3", "3.0") == "NLTK 3.10.3; WordNet 3.0"
     with pytest.raises(ValueError, match="versions must be non-empty"):
         wordnet_version_string("3.10.3", " ")
+
+
+def test_brysbaert_registers_an_unmodified_manual_workbook(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    raw = repo / "data" / "raw"
+    workbook = raw / "brysbaert" / "13428_2013_403_MOESM1_ESM.xlsx"
+    workbook.parent.mkdir(parents=True)
+    payload = b"fixture xlsx bytes"
+    workbook.write_bytes(payload)
+    sources = repo / "data" / "build" / "SOURCES.md"
+    config = {
+        "downloads": {
+            "brysbaert": {"manual_url": "https://doi.org/10.3758/s13428-013-0403-5"},
+            "chunk_size_bytes": 4,
+        }
+    }
+
+    run_brysbaert(config, None, raw, {}, sources, logging.getLogger("test_brysbaert"))
+
+    records = parse_sources(sources.read_text(encoding="utf-8"))
+    assert len(records) == 1
+    record = records[0]
+    assert record.file == "data/raw/brysbaert/13428_2013_403_MOESM1_ESM.xlsx"
+    assert record.bytes == str(len(payload))
+    assert record.sha256 == hashlib.sha256(payload).hexdigest()
+    assert record.license == "as distributed with the article; check terms before redistributing values"
+    assert workbook.read_bytes() == payload

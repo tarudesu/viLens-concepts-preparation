@@ -2,6 +2,7 @@
 
 | source | file | URL | retrieved UTC | bytes | SHA-256 | version/commit/extraction date | license |
 |---|---|---|---|---|---|---|---|
+| brysbaert | data/raw/brysbaert/13428_2013_403_MOESM1_ESM.xlsx | https://doi.org/10.3758/s13428-013-0403-5 | 2026-09-26T13:49:01Z | 2198394 | 1673ead761e28833a40e82c0d20f10782955ced9366d600eafeefee0f2254545 | Brysbaert, Warriner & Kuperman (2014), BRM, doi 10.3758/s13428-013-0403-5, supplementary material ESM1 | as distributed with the article; check terms before redistributing values |
 | cedict | data/raw/cedict/cedict_1_0_ts_utf-8_mdbg.txt.gz | https://www.mdbg.net/chinese/export/cedict/cedict_1_0_ts_utf-8_mdbg.txt.gz | 2026-09-25T16:38:22Z | 3976064 | ee4a029f3a608ccc998b63e73ef933753bf3dce6ec59925aeaf8e69a490b46a1 | CC-CEDICT release date 2026-09-25T08:54:32Z (header #! date=2026-09-25T08:54:32Z) | Creative Commons Attribution-ShareAlike 4.0 International License |
 | lid | data/raw/lid/glotlid/model.bin | https://huggingface.co/cis-lmu/glotlid/resolve/85cd6716494360367b75f642b5bc78667605d0b4/model.bin | 2026-09-25T16:46:48Z | 1687094687 | a818b6bd42a628ab47d3dfc1578c7ea615c45381f3494c42535e31e8c4cafc9e | 85cd6716494360367b75f642b5bc78667605d0b4 | Apache License, Version 2.0 plus notices |
 | lid | data/raw/lid/lid.176.bin | https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin | 2026-09-25T16:46:49Z | 131266198 | 7e69ec5451bc261cc7844e49e4792a85d7f09c06789ec800fc4a44aec362764e | fastText lid.176 language identification model | Creative Commons Attribution-Share-Alike License 3.0 |
