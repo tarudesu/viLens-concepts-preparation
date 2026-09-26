@@ -29,7 +29,8 @@ SPLITS = ("fewshot_reservoir", "directions", "test")
 LANGUAGES = ("zh", "fr", "id")
 STAGES = (
     "canonical_missing_lang", "filter5_proper_noun", "filter3_polysemy",
-    "filter4_surface", "filter4b_loanword", "dedup_vi_form", "dedup_en_lemma",
+    "filter4_surface", "filter4b_loanword", "filter4c_hyphen",
+    "dedup_vi_form", "dedup_en_lemma",
 )
 
 
@@ -180,6 +181,11 @@ def source_matches_drop_list(source: str, exact: set[str], prefixes: list[str]) 
     """Match a normalized source code against exact codes and configured prefixes."""
     normalized = normalize_nfc(source).strip().lower()
     return normalized in exact or any(normalized.startswith(prefix.lower()) for prefix in prefixes)
+
+
+def is_hyphenated_transliteration(word: str) -> bool:
+    """Return whether a canonical Vietnamese form contains an ASCII hyphen."""
+    return "-" in normalize_nfc(word)
 
 
 def old_rule_dropped(records: list[dict[str, str | None]], *, template_names: set[str], chinese_codes: set[str], chinese_prefix: str) -> list[str]:
@@ -350,7 +356,8 @@ def run(config_path: str) -> dict[str, Any]:
         report_bin = float(report["surface_histogram_bin_width"])
         near_n = int(report["surface_near_threshold_n"])
         dedup_examples_n = int(report["dedup_examples_n"])
-        if progress_every < 1 or row_group_size < 1 or not 0 <= threshold <= 1 or not 0 <= percentile <= 100 or report_bin <= 0 or near_n < 0 or dedup_examples_n < 0:
+        hyphen_examples_n = int(report["hyphen_examples_n"])
+        if progress_every < 1 or row_group_size < 1 or not 0 <= threshold <= 1 or not 0 <= percentile <= 100 or report_bin <= 0 or near_n < 0 or dedup_examples_n < 0 or hyphen_examples_n < 0:
             raise ValueError("Invalid step-06 numeric setting in config")
         if filters["polysemy_count"] != "sum_over_homograph_entries":
             raise ValueError(f"Unsupported filters.polysemy_count: {filters['polysemy_count']!r}")
@@ -508,6 +515,16 @@ def run(config_path: str) -> dict[str, Any]:
                     kept.append(row)
             stages["filter4b_loanword"][split] = kept
 
+        hyphen_dropped: dict[str, list[dict[str, Any]]] = {split: [] for split in SPLITS}
+        for split in SPLITS:
+            kept = []
+            for row in stages["filter4b_loanword"][split]:
+                if is_hyphenated_transliteration(row["vi_canonical"]):
+                    hyphen_dropped[split].append(row)
+                else:
+                    kept.append(row)
+            stages["filter4c_hyphen"][split] = kept
+
         loan_audit_rows = []
         for row in sorted(rows, key=lambda item: item["concept_id"]):
             info = loan_info_by_id.get(row["concept_id"])
@@ -523,7 +540,7 @@ def run(config_path: str) -> dict[str, Any]:
         dedup_actions: list[tuple[str, str, str, str]] = []
         final_by_split: dict[str, list[dict[str, Any]]] = {}
         for split in SPLITS:
-            after_vi, vi_actions = _deduplicate(stages["filter4b_loanword"][split], "vi_canonical", zipf_cache)
+            after_vi, vi_actions = _deduplicate(stages["filter4c_hyphen"][split], "vi_canonical", zipf_cache)
             dedup_actions.extend((split, *action) for action in vi_actions)
             after_en, en_actions = _deduplicate(after_vi, "en_lemma", zipf_cache)
             dedup_actions.extend((split, *action) for action in en_actions)
@@ -540,12 +557,13 @@ def run(config_path: str) -> dict[str, Any]:
                 "filter3_polysemy": stages["filter5_proper_noun"][split],
                 "filter4_surface": stages["filter3_polysemy"][split],
                 "filter4b_loanword": stages["filter4_surface"][split],
-                "dedup_vi_form": stages["filter4b_loanword"][split],
-                "dedup_en_lemma": _deduplicate(stages["filter4b_loanword"][split], "vi_canonical", zipf_cache)[0],
+                "filter4c_hyphen": stages["filter4b_loanword"][split],
+                "dedup_vi_form": stages["filter4c_hyphen"][split],
+                "dedup_en_lemma": _deduplicate(stages["filter4c_hyphen"][split], "vi_canonical", zipf_cache)[0],
             }
             stage_outputs = {
                 **stages,
-                "dedup_vi_form": {split: _deduplicate(stages["filter4b_loanword"][split], "vi_canonical", zipf_cache)[0]},
+                "dedup_vi_form": {split: _deduplicate(stages["filter4c_hyphen"][split], "vi_canonical", zipf_cache)[0]},
                 "dedup_en_lemma": {split: final_by_split[split]},
             }
             for stage in STAGES:
@@ -585,6 +603,14 @@ def run(config_path: str) -> dict[str, Any]:
             for stage in STAGES:
                 n_in, _, n_out, out_pos = flow_counts[split][stage]
                 logger.info("%s | %s | n_in=%d | n_out=%d | n_out_by_pos=%s", split, stage, n_in, n_out, json.dumps(dict(sorted(out_pos.items())), sort_keys=True))
+        logger.info("filter4c_hyphen dropped concepts by split: %s", json.dumps({split: len(hyphen_dropped[split]) for split in SPLITS}, sort_keys=True))
+        logger.info("Hyphen-filter examples (vi | en | pos | split):")
+        hyphen_examples = sorted(
+            ((split, row) for split in SPLITS for row in hyphen_dropped[split]),
+            key=lambda item: item[1]["concept_id"],
+        )[:hyphen_examples_n]
+        for split, row in hyphen_examples:
+            logger.info("%s | %s | %s | %s", row["vi_canonical"], row["en_lemma"], row["pos"], split)
         logger.info("filter4b_loanword dropped concepts by source language: %s", json.dumps(dict(sorted(loan_counts.items())), ensure_ascii=False, sort_keys=True))
         logger.info("Recovered at filter4b vs previous rule by source language: %s", json.dumps(dict(sorted(recovered_at_loan_stage.items())), ensure_ascii=False, sort_keys=True))
         logger.info("Additional final-output concepts vs previous parquet: %d; by previous-rule source language: %s", len(recovered_final), json.dumps(dict(sorted(recovered_final_by_source.items())), ensure_ascii=False, sort_keys=True))

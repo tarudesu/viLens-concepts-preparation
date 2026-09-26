@@ -40,6 +40,11 @@ def test_surface_distance_examples_and_minimum_across_candidates() -> None:
     assert distance >= 0.30
 
 
+@pytest.mark.parametrize(("word", "dropped"), [("ô-đờ-cô-lôn", True), ("đường sắt", False), ("máy tính", False)])
+def test_hyphen_filter_uses_canonical_form(word: str, dropped: bool) -> None:
+    assert step06.is_hyphenated_transliteration(word) is dropped
+
+
 def test_zh_latin_filter_and_adj_de_preference() -> None:
     config = _surface_config()
     cache: dict[str, float] = {}

@@ -12,3 +12,7 @@ v1.2 (2026-09-26; pre-data; no model outputs exist at the time of this amendment
   robustness subset. Reason: only ~7% of pool entries carry native-origin evidence.
 - §4.2: POS limited to noun/verb/adj; English lemmas ≤ 2 words; Chinese = Mandarin
   (cmn), Simplified.
+- §4.3 filter 4: threshold set to 0.45 at an empty histogram bin (0.45–0.50),
+  after inspecting items around 0.30 (predominantly loans). Added a hyphenated-
+  transliteration filter. Pre-declared robustness check: primary results
+  re-run excluding min_surface_dist < 0.60.

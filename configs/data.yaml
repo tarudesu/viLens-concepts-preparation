@@ -68,7 +68,7 @@ filters:
   min_sources: 2
   attestation_sources: [wiktextract_table, vi_gloss, muse, wikidata]
   polysemy_percentile: 50
-  surface_edit_threshold: 0.30
+  surface_edit_threshold: 0.45
   zh_forbid_latin: true
   zh_adj_strip_de: true
   polysemy_count: sum_over_homograph_entries
@@ -93,6 +93,7 @@ filters:
     surface_near_threshold_n: 30
     dedup_examples_n: 15
     loanword_examples_n: 15
+    hyphen_examples_n: 20
 
 filter:
   paths:
