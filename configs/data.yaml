@@ -245,6 +245,52 @@ covariates:
     input: data/interim/08_etym.parquet
     output: data/interim/09_cov.parquet
 
+concreteness:
+  paths:
+    raw_dir: data/raw/brysbaert
+    main_input: data/interim/11_diac.parquet
+    main_output: data/interim/11_diac.parquet
+    extension_input: data/interim/11_m1_ext.parquet
+    extension_output: data/interim/11_m1_ext.parquet
+    sources: data/build/SOURCES.md
+  csv:
+    word_column: Word
+    value_column: Conc.M
+  spacy_model: en_core_web_sm
+
+fertility:
+  character_unit: unicode_codepoints_including_spaces
+  paths:
+    flores_dir: data/raw/flores
+    output: data/interim/e1_fertility.csv
+
+direction_flores:
+  fit_fraction: 0.8
+  id_column: id
+  sentence_column: sentence
+  languages: [vi, en, zh, fr, id]
+  codes: {vi: vie_Latn, en: eng_Latn, zh: cmn_Hans, fr: fra_Latn, id: ind_Latn}
+  paths:
+    flores_dir: data/raw/flores
+    output: data/prompts/directions_flores.jsonl
+
+release:
+  require_resolved_concreteness: true
+  qa_sample_per_stratum: 50
+  paths:
+    input: data/interim/12_ru.parquet
+    dropflow: data/interim/dropflow.jsonl
+    sources: data/build/SOURCES.md
+    protocol: PROTOCOL_AMENDMENTS.md
+    output_tsv: data/concepts.tsv
+    agreement: data/agreement.md
+    licenses: data/LICENSES.md
+    qa_sample: data/interim/qa_sample.txt
+    fertility: data/interim/e1_fertility.csv
+    flores_directions: data/prompts/directions_flores.jsonl
+    prompts_dir: data/prompts
+    logs_dir: data/interim/logs
+
 diacritics:
   wordfreq_top_n: 50000 # wordfreq returns its complete Vietnamese vocabulary (10,622 entries)
   expected_wordfreq_n: 10622
@@ -304,9 +350,6 @@ direction_prompts:
   paths:
     input: data/interim/12_ru.parquet
     output: data/prompts/directions_matched.jsonl
-
-release:
-  require_resolved_concreteness: true
 
 inspection:
   english_vietnamese_n: 40

@@ -7,6 +7,9 @@ data/interim/*
 data/interim/logs/*
 !data/interim/logs/.gitkeep
 
+# FLORES-derived prompt text is licensed/gated and must never be committed.
+/data/prompts/directions_flores.jsonl
+
 # Python and local tooling.
 keys/
 __pycache__/
