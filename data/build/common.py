@@ -48,6 +48,28 @@ def normalize_nfc(value: str) -> str:
     return unicodedata.normalize("NFC", value)
 
 
+def ru_stress_free(value: str) -> str:
+    """Remove acute and grave stress marks from a Russian form, preserving ё/е."""
+    if not isinstance(value, str):
+        raise TypeError(f"ru_stress_free expects str, got {type(value).__name__}")
+    decomposed = unicodedata.normalize("NFD", normalize_nfc(value))
+    stress_free = "".join(char for char in decomposed if char not in {"\u0301", "\u0300"})
+    return unicodedata.normalize("NFC", stress_free)
+
+
+def norm_ru(value: str) -> str:
+    """Normalize Russian text for matching, ignoring stress and ё/е distinctions."""
+    if not isinstance(value, str):
+        raise TypeError(f"norm_ru expects str, got {type(value).__name__}")
+    result = ru_stress_free(value).casefold().replace("ё", "е")
+    start, end = 0, len(result)
+    while start < end and (result[start].isspace() or unicodedata.category(result[start]).startswith("P")):
+        start += 1
+    while end > start and (result[end - 1].isspace() or unicodedata.category(result[end - 1]).startswith("P")):
+        end -= 1
+    return result[start:end]
+
+
 def vi_orth_key(value: str) -> str:
     """Return a normalized Vietnamese orthographic-equivalence key.
 

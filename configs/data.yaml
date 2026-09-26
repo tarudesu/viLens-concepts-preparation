@@ -266,6 +266,33 @@ m1_extension:
     main_step11: data/interim/11_diac.parquet
     output: data/interim/11_m1_ext.parquet
 
+prompts:
+  label: {vi: "Tiếng Việt", ru: "Русский"}
+  translation:
+    src_lang: ru
+    k: 5
+    nllb_target_code: rus_Cyrl
+  repetition:
+    k: 5
+  cloze:
+    k: 3
+    min_test_concepts_primary: 300
+    answer_label: "Đáp án:"
+    max_syllables: 25
+  fewshot:
+    n_final: 30
+    n_sets: 6
+    set_size: 5
+    primary_set: 1
+    minimum_eligible_n: 20 # Stop if fewer; otherwise choose whole sets of five.
+  target_splits: [test]
+  paths:
+    english_dump: data/raw/wiktextract_en/kaikki.org-dictionary-English.jsonl
+    main_step11: data/interim/11_diac.parquet
+    extension: data/interim/11_m1_ext.parquet
+    ru_output: data/interim/12_ru.parquet
+    output_dir: data/prompts
+
 release:
   require_resolved_concreteness: true
 

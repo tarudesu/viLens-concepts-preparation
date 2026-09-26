@@ -46,4 +46,6 @@ v1.2 (2026-09-26; pre-data; no model outputs exist at the time of this amendment
   dataset unchanged): an M1-only extension set of monosyllabic concepts with
   exactly 2 senses that pass all other filters, used solely for the M1-vs-M2
   comparison (C1).
-- M1 set = single-token items of the main test set ∪ M1-only extension (monosyllabic, exactly 2 senses, all other filters passed). Sizes: Gemma 186, Qwen 161–165, Llama 161 (final counts in agreement.md). M1-vs-M2 is also reported on main-set items only.
+- M1 set = single-token items of the main test set ∪ M1-only extension (monosyllabic, exactly 2 senses, all other filters passed). Sizes: Gemma 186, Qwen 166, Llama 162 (final counts in agreement.md). M1-vs-M2 is also reported on main-set items only.
+- Russian forms are stored without stress marks; ё/е are treated as equivalent when matching. Few-shot eligibility: ru canonical with NLLB agreement and filter-2 pass (collapse status is irrelevant, because few-shot examples are never diacritic-stripped).
+- Checkpoint D outcome: Russian is the translation-prompt source; templates are unquoted; cloze examples come from Vietnamese Wiktionary examples. Cloze coverage is 337 test concepts (primary; threshold 300). Few-shot selection uses 30 examples in six sets of five, with set 1 primary.

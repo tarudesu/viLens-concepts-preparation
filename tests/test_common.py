@@ -17,8 +17,10 @@ from data.build.common import (
     log_dropflow,
     normalize_nfc,
     normalize_strings,
+    norm_ru,
     normalized_levenshtein,
     require_resolved_concreteness,
+    ru_stress_free,
     setup_logging,
     strip_diacritics,
     stream_jsonl,
@@ -28,6 +30,13 @@ from data.build.common import (
 
 def test_normalize_nfc() -> None:
     assert normalize_nfc("e\u0301") == "é"
+
+
+def test_russian_stress_removal_and_matching() -> None:
+    assert ru_stress_free("кни́га") == "книга"
+    assert norm_ru("ёж") == norm_ru("еж")
+    assert ru_stress_free("ё́ж") == "ёж"
+    assert norm_ru("ё́ж") == norm_ru("еж")
 
 
 def test_strip_diacritics_including_vietnamese_d() -> None:
