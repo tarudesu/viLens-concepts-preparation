@@ -107,9 +107,23 @@ nllb:
   num_beams: 5
   num_return: 5
   batch_size: 64
+  max_new_tokens: 16
+  do_sample: false
+  cache_dir: data/raw/nllb_translation_cache
+  lang_codes: {vi: vie_Latn, en: eng_Latn, zh: zho_Hans, fr: fra_Latn, id: ind_Latn}
   test_input: máy tính
   test_source_lang: vie_Latn
   test_target_lang: eng_Latn
+
+backtranslate:
+  paths:
+    input: data/interim/06_filtered.parquet
+    output: data/interim/07_bt.parquet
+  report:
+    failure_sample_n: 30
+    change_examples_n: 20
+    prioritize_en_lemmas: [fourth, sixth]
+    syllable_bins: [1, 2]
 
 wikidata:
   enabled: true

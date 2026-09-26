@@ -1,0 +1,16 @@
+{
+  "row": {
+    "concept_id": "toy",
+    "en_lemma": "cat",
+    "pos": "noun",
+    "split": "test",
+    "vi_canonical": "mèo",
+    "vi_alts": ["miêu"],
+    "zh_canonical": "猫",
+    "zh_alts": ["貓"],
+    "fr_canonical": "chat",
+    "fr_alts": ["félin"],
+    "id_canonical": "kucing",
+    "id_alts": []
+  }
+}
