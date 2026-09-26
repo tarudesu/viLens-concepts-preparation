@@ -255,6 +255,17 @@ diacritics:
     output: data/interim/11_diac.parquet
     vietnamese_dump: data/raw/wiktextract_vi/kaikki.org-dictionary-Vietnamese.jsonl
 
+m1_extension:
+  target_n_senses_vi: 2
+  target_syllables: 1
+  candidate_polysemy_percentile: 100 # diagnostic pass only; frozen cutoffs restored before acceptance
+  paths:
+    step05: data/interim/05_split.parquet
+    main_step06: data/interim/06_filtered.parquet
+    main_step07: data/interim/07_bt.parquet
+    main_step11: data/interim/11_diac.parquet
+    output: data/interim/11_m1_ext.parquet
+
 release:
   require_resolved_concreteness: true
 

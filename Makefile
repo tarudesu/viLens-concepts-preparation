@@ -14,7 +14,7 @@ ifneq ($(words $(STEP_NUMBERS)),$(words $(sort $(STEP_NUMBERS))))
 $(error Expected exactly one script per step in $(BUILD_DIR))
 endif
 
-.PHONY: all download pool attest split filter backtranslate etymology covariates tokens diacritics test $(STEP_TARGETS)
+.PHONY: all download pool attest split filter backtranslate etymology covariates tokens diacritics m1-extension prompts test $(STEP_TARGETS)
 # Steps consume previous steps' outputs, including when called with make -j.
 .NOTPARALLEL:
 
@@ -42,6 +42,11 @@ covariates: step-09
 tokens: step-10
 
 diacritics: step-11
+
+m1-extension:
+	PYTORCH_ENABLE_MPS_FALLBACK=1 $(PYTHON) -B $(BUILD_DIR)/11b_m1_extension.py --config "$(CONFIG)"
+
+prompts: step-12
 
 test:
 	$(PYTHON) -B -m pytest
