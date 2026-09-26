@@ -1,0 +1,21 @@
+{
+  "cjk_ranges": [[13312, 19903], [19968, 40959], [131072, 173791]],
+  "settings": {
+    "sinitic_codes": ["zh", "cmn", "ltc", "och", "lzh", "lzh-lit", "yue", "hak", "wuu", "cdo", "gan", "hsn"],
+    "sinitic_prefixes": ["zh-", "nan"],
+    "sino_japanese_codes": ["ja", "ko"],
+    "loan_templates": ["bor", "bor+", "lbor", "obor", "der", "der+"],
+    "calque_templates": ["cal", "calque"],
+    "native_markers_text": ["Proto-Vietic", "Proto-Mon-Khmer", "Proto-Austroasiatic"],
+    "native_templates": ["inh", "inh+"],
+    "gloss_overlap_min": 1
+  },
+  "may_nom_meaning_failure": {
+    "canonical_vi": "may",
+    "han_string": "埋",
+    "reading": "mai",
+    "cedict_gloss": "to bury",
+    "concept_gloss": "to sew",
+    "expected_failure": "meaning"
+  }
+}

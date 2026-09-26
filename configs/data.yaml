@@ -94,6 +94,7 @@ filters:
     dedup_examples_n: 15
     loanword_examples_n: 15
     hyphen_examples_n: 20
+    orth_merge_examples_n: 10
 
 filter:
   paths:
@@ -125,9 +126,36 @@ backtranslate:
     failure_sample_n: 30
     new_pass_sample_n: 30
     still_fail_sample_n: 20
+    promotion_examples_n: 15
     change_examples_n: 20
     prioritize_en_lemmas: [fourth, sixth]
     syllable_bins: [1, 2]
+
+etymology:
+  sinitic_codes: [zh, cmn, ltc, och, lzh, lzh-lit, yue, hak, wuu, cdo, gan, hsn]
+  sinitic_prefixes: ["zh-", "nan"]
+  sino_japanese_codes: [ja, ko]   # Sino only if args["3"] contains CJK
+  loan_templates: [bor, "bor+", lbor, obor, der, "der+"]
+  calque_templates: [cal, calque]
+  native_markers_text: [Proto-Vietic, Proto-Mon-Khmer, Proto-Austroasiatic]
+  native_templates: [inh, "inh+"]
+  gloss_overlap_min: 1
+  bootstrap_resamples: 1000
+  bootstrap_confidence: 0.95
+  power_alpha: 0.05
+  power_holm_comparisons: 6
+  power_target: 0.80
+  report:
+    failure_examples_per_reason: 10
+    nonsino_sino_examples_max: 30
+    syllable_bins: [1, 2]
+  paths:
+    input: data/interim/07_bt.parquet
+    output: data/interim/08_etym.parquet
+    vietnamese_dump: data/raw/wiktextract_vi/kaikki.org-dictionary-Vietnamese.jsonl
+    unihan_readings: data/raw/unihan/extracted/Unihan_Readings.txt
+    unihan_variants: data/raw/unihan/extracted/Unihan_Variants.txt
+    cedict: data/raw/cedict/cedict_1_0_ts_utf-8_mdbg.txt.gz
 
 wikidata:
   enabled: true
@@ -226,5 +254,3 @@ inspection:
     traditional_tag: Traditional
     subpage_markers: [trans-see, see-translation, translation subpage]
     proto_terms: [Proto-Vietic, Proto-Mon-Khmer, Proto-Austroasiatic]
-    orth_merge_examples_n: 10
-    promotion_examples_n: 15
