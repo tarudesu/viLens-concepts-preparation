@@ -7,7 +7,10 @@ ifeq ($(strip $(BUILD_DIR)),)
 $(error Unable to read paths.build from $(CONFIG))
 endif
 STEP_SCRIPTS := $(sort $(wildcard $(BUILD_DIR)/[0-9][0-9]_*.py $(BUILD_DIR)/[0-9][0-9][a-z]_*.py))
-STEP_NUMBERS := $(foreach script,$(STEP_SCRIPTS),$(firstword $(subst _, ,$(notdir $(script)))))
+DISCOVERED_STEP_NUMBERS := $(foreach script,$(STEP_SCRIPTS),$(firstword $(subst _, ,$(notdir $(script)))))
+# This is dependency order, not lexical order: 09b enriches step-11 outputs.
+STEP_ORDER := 00 01 02 03 04 05 06 07 08 09 10 10b 11 11b 09b 12 13 13b 14
+STEP_NUMBERS := $(filter $(DISCOVERED_STEP_NUMBERS),$(STEP_ORDER))
 STEP_TARGETS := $(addprefix step-,$(STEP_NUMBERS))
 
 ifneq ($(words $(STEP_NUMBERS)),$(words $(sort $(STEP_NUMBERS))))
