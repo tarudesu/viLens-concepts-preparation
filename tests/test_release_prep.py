@@ -135,15 +135,21 @@ def test_13b_missing_input_diagnostic(tmp_path: Path) -> None:
     assert step.missing_flores_message(paths) == f"Step 13b requires FLORES dev input files: missing {paths[0]}, {paths[1]}"
 
 
-def test_14_fewshot_parser_release_projection_and_tsv() -> None:
+def test_14_structured_fewshot_metadata_release_projection_and_tsv(tmp_path: Path) -> None:
     step = load_script("14_release.py")
-    fewshot = step.parse_fewshot_log(
-        "INFO Few-shot list: set | en | vi | ru | stratum\n"
-        "INFO 1 | cat | mèo | кошка | sino\n"
-        "INFO 2 | dog | chó | собака | nonsino\n"
-        "INFO Cloze coverage all TEST=1\n"
-    )
-    assert fewshot[("cat", "mèo", "кошка")] == 1
+    metadata_path = tmp_path / "12_fewshot.json"
+    metadata_path.write_text(json.dumps({
+        "schema_version": 1,
+        "fewshot_sets": {"1": ["b"], "2": ["c"]},
+        "cloze_demonstration_concept_ids": ["b"],
+        "test_cloze_concept_ids": ["test-x"],
+        "cloze_status": "supplementary",
+        "main_test_cloze_coverage": {"n_available": 1, "n_test": 4,
+                                      "by_stratum": {"sino": {"n_available": 1, "n_test": 2}}},
+    }, ensure_ascii=False), encoding="utf-8")
+    metadata = step._read_fewshot_metadata(metadata_path)
+    fewshot = metadata["fewshot_set_by_id"]
+    assert fewshot == {"b": 1, "c": 2}
     columns = step.release_columns(["vi", "en", "zh", "fr", "id"], ["gemma"])
     row = {
         "concept_id": "b", "split": "test", "vi_canonical": "mèo", "en_lemma": "cat",
@@ -237,22 +243,33 @@ def test_14_agreement_contains_flores_hash_only(tmp_path: Path) -> None:
         "single_token_vi_gemma": True, "m1_eligible_gemma": True,
     }
     config = {
+        "seed": 20260925,
         "langs": ["vi", "en", "zh", "fr", "id"],
         "downloads": {"chunk_size_bytes": 4},
         "split": {"syllable_bins": [1, 2]},
         "tokens": {"models": ["gemma"]},
+        "etymology": {"bootstrap_resamples": 20, "bootstrap_confidence": 0.95,
+                       "power_alpha": 0.05, "power_holm_comparisons": 6, "power_target": 0.8,
+                       "h3_confirmatory_kappa_lower_min": 0.6, "h3_confirmatory_holm_mde_max": 0.3},
         "release": {"paths": {"sources": "data/build/SOURCES.md"}},
         "prompts": {"cloze": {"cloze_status": "supplementary"}},
+    }
+    fewshot_metadata = {
+        "fewshot_sets": {}, "cloze_status": "supplementary",
+        "main_test_cloze_coverage": {"n_available": 0, "n_test": 0, "by_stratum": {}},
     }
     report = step.build_agreement(
         [row], dropflow=[{"step": "06", "stage": "filter4_test", "unit": "concepts", "n_in": 1,
                           "n_out": 1, "n_out_by_pos": {"noun": 1}}],
-        sources=[], config=config, logs_dir=tmp_path / "logs", fertility_path=tmp_path / "missing.csv",
+        sources=[], config=config, fewshot_metadata=fewshot_metadata,
+        fertility_path=tmp_path / "missing.csv",
         flores_path=flores, protocol_path=Path("PROTOCOL_AMENDMENTS.md"),
     )
     assert step.sha256_file(flores, chunk_size_bytes=4) in report
     assert "fixture FLORES sentence" not in report
     assert "filter4" in report and "wiktionary_char for 0/1" in report
+    assert "Step-12 main-test cloze coverage: 0/0" in report
+    assert "Selected few-shot concepts" in report
 
 
 def test_ignored_flores_output() -> None:

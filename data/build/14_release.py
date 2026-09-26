@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import importlib.util
 import json
 import logging
 import os
@@ -35,36 +36,6 @@ ATTESTATION_FLAGS = ("in_vi_gloss", "in_muse", "in_wikidata", "external_attested
 def missing_input_message(path: Path) -> str:
     """Return the stable diagnostic for absent step-12 release data."""
     return f"Step 14 requires step-12 enriched input: missing {path}"
-
-
-def parse_fewshot_log(text: str) -> dict[tuple[str, str, str], int]:
-    """Read selected set membership from step-12's auditable selected-concept list."""
-    result: dict[tuple[str, str, str], int] = {}
-    in_list = False
-    for raw_line in text.splitlines():
-        line = raw_line.removeprefix("INFO ")
-        if line.strip() == "Few-shot list: set | en | vi | ru | stratum":
-            in_list = True
-            continue
-        if not in_list:
-            continue
-        if not line or not line[0].isdigit():
-            if result:
-                break
-            continue
-        parts = line.split(" | ", maxsplit=4)
-        if len(parts) != 5 or not parts[0].isdigit():
-            raise ValueError(f"Malformed few-shot list line in step-12 log: {raw_line!r}")
-        set_number = int(parts[0])
-        key = tuple(normalize_nfc(value).strip() for value in parts[1:4])
-        if not all(key) or set_number < 1:
-            raise ValueError(f"Malformed selected few-shot concept in step-12 log: {raw_line!r}")
-        if key in result:
-            raise ValueError(f"Selected few-shot concept occurs more than once in step-12 log: {key!r}")
-        result[key] = set_number
-    if not result:
-        raise ValueError("Step-12 log has no selected few-shot list")
-    return result
 
 
 def selected_vi_candidate(row: dict[str, Any]) -> dict[str, Any]:
@@ -144,7 +115,7 @@ def required_release_columns(languages: list[str], models: list[str]) -> set[str
 
 
 def project_release_row(
-    row: dict[str, Any], *, columns: list[str], fewshot_sets: dict[tuple[str, str, str], int],
+    row: dict[str, Any], *, columns: list[str], fewshot_sets: dict[str, int],
     cloze_ids: set[str],
 ) -> dict[str, Any]:
     """Project one enriched pipeline row onto the explicitly declared TSV schema."""
@@ -182,9 +153,7 @@ def project_release_row(
         "n_syllables": row.get("n_syllables"), "concreteness": row.get("concreteness"),
         "concreteness_match": row.get("concreteness_match"),
         "m1_extension": row.get("m1_extension"), "cloze_available": row["concept_id"] in cloze_ids,
-        "fewshot_set": fewshot_sets.get((normalize_nfc(row["en_lemma"]).strip(),
-                                           normalize_nfc(row["vi_canonical"]).strip(),
-                                           normalize_nfc(row.get("ru_canonical") or "").strip())),
+        "fewshot_set": fewshot_sets.get(row["concept_id"]),
     }
     for language in ("vi", "en", "zh", "fr", "id"):
         result[f"zipf_{language}"] = row.get(f"zipf_{language}")
@@ -265,23 +234,6 @@ def sha256_file(path: Path, *, chunk_size_bytes: int) -> str:
     return digest.hexdigest()
 
 
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    """Read generated prompt records line-by-line and validate JSON objects."""
-    output: list[dict[str, Any]] = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            if not line.strip():
-                continue
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise ValueError(f"Malformed JSONL at {path}:{line_number}: {exc}") from exc
-            if not isinstance(record, dict):
-                raise ValueError(f"Expected JSON object at {path}:{line_number}")
-            output.append(normalize_strings(record))
-    return output
-
-
 def _read_pipe_table(path: Path) -> list[dict[str, str]]:
     """Parse the pinned SOURCES Markdown table."""
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -301,27 +253,55 @@ def _read_pipe_table(path: Path) -> list[dict[str, str]]:
     return rows
 
 
-def _read_fewshot_sets(path: Path) -> dict[tuple[str, str, str], int]:
+def _read_fewshot_metadata(path: Path) -> dict[str, Any]:
+    """Load and validate step-12's machine-readable few-shot/cloze evidence."""
     if not path.is_file():
-        raise FileNotFoundError(f"Step 14 requires step-12 selected few-shot evidence: missing {path}")
-    return parse_fewshot_log(path.read_text(encoding="utf-8"))
-
-
-def _read_cloze_ids(path: Path) -> set[str]:
-    if not path.is_file():
-        raise FileNotFoundError(f"Step 14 requires step-12 cloze prompt evidence: missing {path}")
-    records = _read_jsonl(path)
-    ids = [record.get("concept_id") for record in records]
-    if any(not isinstance(value, str) or not value for value in ids) or len(ids) != len(set(ids)):
-        raise ValueError(f"Malformed or duplicate concept IDs in cloze prompt file {path}")
-    return set(ids)
-
-
-def _latest_log_lines(log_path: Path, patterns: tuple[str, ...]) -> list[str]:
-    if not log_path.is_file():
-        return []
-    return [line.removeprefix("INFO ") for line in log_path.read_text(encoding="utf-8").splitlines()
-            if any(pattern in line for pattern in patterns)]
+        raise FileNotFoundError(f"Step 14 requires structured step-12 metadata: missing {path}")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Malformed step-12 metadata JSON at {path}: {exc}") from exc
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        raise ValueError(f"Unsupported or malformed step-12 metadata schema in {path}")
+    payload = normalize_strings(payload)
+    raw_sets = payload.get("fewshot_sets")
+    if not isinstance(raw_sets, dict) or not raw_sets:
+        raise ValueError(f"Step-12 metadata has no fewshot_sets mapping: {path}")
+    seen_ids: set[str] = set()
+    fewshot_set_by_id: dict[str, int] = {}
+    for raw_number, ids in sorted(raw_sets.items(), key=lambda item: int(item[0])):
+        try:
+            set_number = int(raw_number)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Malformed few-shot set number {raw_number!r} in {path}") from exc
+        if set_number < 1 or not isinstance(ids, list) or not ids:
+            raise ValueError(f"Malformed few-shot set {raw_number!r} in {path}")
+        if any(not isinstance(value, str) or not value for value in ids) or len(ids) != len(set(ids)):
+            raise ValueError(f"Few-shot set {raw_number!r} has malformed or duplicate concept IDs")
+        overlap = seen_ids.intersection(ids)
+        if overlap:
+            raise ValueError(f"Concept IDs occur in multiple few-shot sets: {sorted(overlap)[:10]!r}")
+        seen_ids.update(ids)
+        fewshot_set_by_id.update({concept_id: set_number for concept_id in ids})
+    for name in ("cloze_demonstration_concept_ids", "test_cloze_concept_ids"):
+        ids = payload.get(name)
+        if not isinstance(ids, list) or any(not isinstance(value, str) or not value for value in ids):
+            raise ValueError(f"Step-12 metadata field {name!r} must be a list of non-empty IDs")
+        if len(ids) != len(set(ids)):
+            raise ValueError(f"Step-12 metadata field {name!r} contains duplicate IDs")
+    if set(payload["cloze_demonstration_concept_ids"]) - seen_ids:
+        raise ValueError("Cloze demonstrations must be selected from the few-shot sets")
+    if payload.get("cloze_status") not in {"primary", "supplementary"}:
+        raise ValueError(f"Malformed cloze_status in step-12 metadata: {payload.get('cloze_status')!r}")
+    coverage = payload.get("main_test_cloze_coverage")
+    if not isinstance(coverage, dict) or type(coverage.get("n_available")) is not int or type(coverage.get("n_test")) is not int:
+        raise ValueError("Step-12 metadata lacks integer main-test cloze coverage counts")
+    if coverage["n_available"] < 0 or coverage["n_test"] < coverage["n_available"]:
+        raise ValueError("Step-12 metadata has invalid main-test cloze coverage counts")
+    if not isinstance(coverage.get("by_stratum"), dict):
+        raise ValueError("Step-12 metadata main-test cloze coverage lacks by_stratum")
+    payload["fewshot_set_by_id"] = fewshot_set_by_id
+    return payload
 
 
 def _markdown_table(headers: list[str], rows: Iterable[Iterable[Any]]) -> str:
@@ -344,12 +324,34 @@ def _ratio(numerator: int, denominator: int) -> str:
     return f"{numerator}/{denominator} ({numerator / denominator:.4f})" if denominator else "0/0 (NA)"
 
 
+def _load_step_module(step_file: str) -> Any:
+    """Load an adjacent pipeline module for shared, audited calculations."""
+    module_path = Path(__file__).resolve().parent / step_file
+    spec = importlib.util.spec_from_file_location(f"vilens_release_{module_path.stem}", module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load pipeline helper from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _muse_vi_space_summary(config: dict[str, Any]) -> tuple[int, int]:
+    """Recompute the MUSE VI-side multiword finding from the two source files."""
+    paths = config["attest"]["paths"]
+    step04 = _load_step_module("04_attest.py")
+    pairs = step04.load_muse_pairs(paths["muse_vi_en"], "vi-en")
+    pairs.update(step04.load_muse_pairs(paths["muse_en_vi"], "en-vi"))
+    forms = {vi for vi, _en in pairs}
+    return sum(" " in form for form in forms), len(forms)
+
+
 def build_agreement(
     rows: list[dict[str, Any]], *, dropflow: list[dict[str, Any]], sources: list[dict[str, str]],
-    config: dict[str, Any], logs_dir: Path, fertility_path: Path, flores_path: Path,
-    protocol_path: Path,
+    config: dict[str, Any], fewshot_metadata: dict[str, Any], fertility_path: Path,
+    flores_path: Path, protocol_path: Path,
 ) -> str:
-    """Build the reproducibility report from latest intermediates and step logs."""
+    """Build the reproducibility report only from structured outputs and source files."""
+    main_rows = [row for row in rows if row.get("m1_extension") is not True]
     lines = ["# Dataset agreement and release audit", "",
              f"Protocol: [{protocol_path.name}](../{protocol_path.name})  ",
              f"Source provenance: [{Path(config['release']['paths']['sources']).name}](../build/SOURCES.md)", ""]
@@ -363,36 +365,93 @@ def build_agreement(
     lines += ["## Attestation", "", "Shares are computed on the released rows within each split; flags are sourced from the selected VI candidate.", ""]
     attestation_rows = []
     for split in SPLIT_ORDER:
-        selected = [row for row in rows if row["split"] == split]
+        selected = [row for row in main_rows if row["split"] == split]
         for flag in ATTESTATION_FLAGS:
             count = sum(bool(selected_vi_candidate(row).get(flag)) if flag != "external_attested" else bool(row.get(flag)) for row in selected)
             attestation_rows.append((split, flag, _ratio(count, len(selected))))
     lines += [_markdown_table(["split", "flag", "share"], attestation_rows), ""]
-    muse_log = _latest_log_lines(logs_dir / "04_attest.log", ("MUSE unique VI-side forms containing a space",))
-    lines += ["MUSE multi-syllable finding: " + (muse_log[0] if muse_log else "not available in the step-04 log."), ""]
+    try:
+        muse_multiword, muse_total = _muse_vi_space_summary(config)
+        lines += [f"MUSE unique VI-side forms containing a space: {_ratio(muse_multiword, muse_total)}.", ""]
+    except (KeyError, FileNotFoundError) as exc:
+        lines += [f"MUSE unique VI-side forms containing a space: unavailable ({exc}).", ""]
 
     lines += ["## Etymology agreement and H3", ""]
-    etym_lines = _latest_log_lines(logs_dir / "08_etymology.log", ("Cohen kappa (primary", "Cohen kappa (strict", "Cohen kappa (relaxed", "H3 status rule", "sino_via counts:", "Power (", "sino_vs_"))
-    lines += ["```text", *(etym_lines or ["Step-08 audit lines unavailable."]), "```", ""]
-    primary_verified = [item for row in rows for item in (row.get("han_verifications") or [])
+    etym_settings = config["etymology"]
+    step08 = _load_step_module("08_etymology.py")
+    kappa_rows = [row for row in main_rows if row.get("signal_a") in {"sino", "nonsino"}]
+    a_labels = [row["signal_a"] for row in kappa_rows]
+    kappa_results: dict[str, tuple[float | None, float | None, float | None]] = {}
+    for label, field in (("primary", "signal_b"), ("strict", "signal_b_strict"),
+                         ("relaxed", "signal_b_relaxed")):
+        result = step08.bootstrap_kappa_ci(
+            a_labels, [row[field] for row in kappa_rows],
+            resamples=int(etym_settings["bootstrap_resamples"]),
+            confidence=float(etym_settings["bootstrap_confidence"]), seed=int(config["seed"]),
+        )
+        kappa_results[label] = result
+    crosstab = Counter((row.get("signal_a"), row.get("signal_b")) for row in main_rows)
+    lines += ["Signal A × primary Signal B:", "",
+              _markdown_table(["A", "B=sino", "B=nonsino"],
+                              ((label, crosstab[(label, "sino")], crosstab[(label, "nonsino")])
+                               for label in ("sino", "nonsino", "other_loan", "conflict"))), "",
+              "Cohen's κ (A ∈ {sino, nonsino}); seeded percentile bootstrap:", "",
+              _markdown_table(["B variant", "n", "κ", "95% CI"],
+                              ((label, len(kappa_rows),
+                                f"{estimate:.6f}" if estimate is not None else "NA",
+                                f"[{lower:.6f}, {upper:.6f}]" if lower is not None and upper is not None else "NA")
+                               for label, (estimate, lower, upper) in kappa_results.items())), ""]
+    primary_verified = [item for row in main_rows for item in (row.get("han_verifications") or [])
                         if isinstance(item, dict) and item.get("primary_pass") is True]
     char_readings = sum(item.get("reading_source") == "wiktionary_char" for item in primary_verified)
     lines += [f"Primary-verified reading_source = wiktionary_char for {_ratio(char_readings, len(primary_verified))}.", ""]
+    primary_lower = kappa_results["primary"][1]
+    test_rows = [row for row in main_rows if row.get("split") == "test"]
+    n_sino = sum(row.get("stratum") == "sino" for row in test_rows)
+    n_nonsino = sum(row.get("stratum") == "nonsino" for row in test_rows)
+    n_native = sum(row.get("native_strict") is True for row in test_rows)
+    sino_via_counts = Counter(value for row in main_rows for value in (row.get("sino_via") or []))
+    lines += [f"sino_via counts: `{json.dumps(dict(sorted(sino_via_counts.items())), ensure_ascii=False, sort_keys=True)}`.",
+              f"TEST native_strict concepts: {n_native}.", ""]
+    power_alpha = float(etym_settings["power_alpha"])
+    power_divisor = int(etym_settings["power_holm_comparisons"])
+    target_power = float(etym_settings["power_target"])
+    power_rows = []
+    adjusted_sino_nonsino: float | None = None
+    for comparison, n1, n2 in (("sino_vs_nonsino", n_sino, n_nonsino),
+                               ("sino_vs_native_strict", n_sino, n_native)):
+        unadjusted = step08.minimum_detectable_difference(n1, n2, alpha=power_alpha, power=target_power)
+        adjusted = step08.minimum_detectable_difference(n1, n2, alpha=power_alpha / power_divisor, power=target_power)
+        if comparison == "sino_vs_nonsino":
+            adjusted_sino_nonsino = adjusted
+        power_rows.append((comparison, n1, n2,
+                           f"{unadjusted:.6f}" if unadjusted is not None else "NA",
+                           f"{adjusted:.6f}" if adjusted is not None else "NA"))
+    confirmatory = (primary_lower is not None
+                    and primary_lower >= float(etym_settings["h3_confirmatory_kappa_lower_min"])
+                    and adjusted_sino_nonsino is not None
+                    and adjusted_sino_nonsino <= float(etym_settings["h3_confirmatory_holm_mde_max"]))
+    primary_lower_text = f"{primary_lower:.6f}" if primary_lower is not None else "NA"
+    adjusted_mde_text = f"{adjusted_sino_nonsino:.6f}" if adjusted_sino_nonsino is not None else "NA"
+    lines += ["Power (two-sided standardized MDE, 80% target):", "",
+              _markdown_table(["comparison", "n1", "n2", "d at α=.05", "d at Holm α"], power_rows), "",
+              f"H3 status by configured rule: **{'confirmatory' if confirmatory else 'exploratory'}** "
+              f"(primary κ lower bound={primary_lower_text}; Holm MDE={adjusted_mde_text}).", ""]
 
     lines += ["## Strata", ""]
     strata_rows = []
     for split in SPLIT_ORDER:
-        subset = [row for row in rows if row["split"] == split]
+        subset = [row for row in main_rows if row["split"] == split]
         counts = Counter(row["stratum"] for row in subset)
-    for stratum in STRATUM_ORDER:
-        strata_rows.append((split, stratum, counts[stratum]))
+        for stratum in STRATUM_ORDER:
+            strata_rows.append((split, stratum, counts[stratum]))
     lines += [_markdown_table(["split", "stratum", "concepts"], strata_rows), ""]
     syllable_edges = config["split"]["syllable_bins"]
     if len(syllable_edges) != 2 or syllable_edges != sorted(set(syllable_edges)):
         raise ValueError(f"Invalid split.syllable_bins in release config: {syllable_edges!r}")
     syllable_labels = (str(syllable_edges[0]), str(syllable_edges[1]), f"{syllable_edges[1] + 1}+")
     syllable_rows = []
-    for row in rows:
+    for row in main_rows:
         if row["split"] != "test":
             continue
         syllables = row.get("n_syllables")
@@ -407,14 +466,11 @@ def build_agreement(
                               ((pos, bucket, stratum, counts[(pos, bucket, stratum)])
                                for pos, bucket, stratum in sorted(counts))), ""]
 
-    lines += ["## Power", "", "See the exact test-split power calculations from step 08:", "", "```text",
-              *(_latest_log_lines(logs_dir / "08_etymology.log", ("sino_vs_",)) or ["Unavailable."]), "```", ""]
-
     lines += ["## Diacritic collapse", ""]
     collapse_rows = []
     for split in SPLIT_ORDER:
         for stratum in STRATUM_ORDER:
-            selected = [row for row in rows if row["split"] == split and row["stratum"] == stratum]
+            selected = [row for row in main_rows if row["split"] == split and row["stratum"] == stratum]
             collapsed = sum(bool(row.get("collapsed")) for row in selected)
             if selected:
                 collapse_rows.append((split, stratum, _ratio(collapsed, len(selected))))
@@ -423,7 +479,7 @@ def build_agreement(
     lines += ["## E1 tokenization and M1", "", "Token counts and single-token coverage are computed on the TEST rows.", ""]
     model_names = list(config["tokens"].get("models", ["gemma", "qwen", "llama"]))
     token_rows = []
-    test_rows = [row for row in rows if row["split"] == "test"]
+    test_rows = [row for row in main_rows if row["split"] == "test"]
     for model in model_names:
         for language in config["langs"]:
             field = f"ntok_{model}_{language}"
@@ -461,7 +517,7 @@ def build_agreement(
     m1_rows = []
     for model in model_names:
         field = f"m1_eligible_{model}"
-        selected = [row for row in rows if row.get("split") == "test"]
+        selected = [row for row in rows if row.get("split") == "test" or row.get("m1_extension") is True]
         m1_rows.append((model, sum(row.get(field) is True for row in selected)))
     extension_n = sum(row.get("m1_extension") is True for row in rows)
     lines += [f"M1 extension concepts: {extension_n}", "", _markdown_table(["model", "M1 eligible (main test + extension)"], m1_rows), ""]
@@ -480,20 +536,23 @@ def build_agreement(
     else:
         lines += ["FLORES direction-prompt JSONL SHA-256: not yet available.", ""]
 
-    cloze_config = config["prompts"]["cloze"]
-    cloze_log = _latest_log_lines(logs_dir / "12_prompts.log", ("Cloze coverage all TEST=",))
-    cloze_status = cloze_config.get("cloze_status", "unknown")
-    lines += ["## Cloze and few-shot", "", f"Configured cloze status: **{cloze_status}**.", ""]
-    if cloze_log:
-        lines += ["Step-12 main-test coverage: " + cloze_log[-1] + ".", ""]
-    fewshot_log_path = logs_dir / "12_prompts.log"
-    if fewshot_log_path.is_file():
-        fewshot_lines = []
-        for line in fewshot_log_path.read_text(encoding="utf-8").splitlines():
-            raw = line.removeprefix("INFO ")
-            if re.match(r"^[1-9][0-9]* \| .+ \| .+ \| .+ \| (sino|nonsino|ambiguous|other_loan)$", raw):
-                fewshot_lines.append(raw)
-        lines += ["Selected few-shot concepts (set | en | vi | ru | stratum):", "", "```text", *fewshot_lines, "```", ""]
+    coverage = fewshot_metadata["main_test_cloze_coverage"]
+    lines += ["## Cloze and few-shot", "", f"Recorded cloze status: **{fewshot_metadata['cloze_status']}**.", "",
+              f"Step-12 main-test cloze coverage: {coverage['n_available']}/{coverage['n_test']}.", "",
+              "Main-test cloze coverage by stratum:", "",
+              _markdown_table(["stratum", "available", "main test"],
+                              ((stratum, counts["n_available"], counts["n_test"])
+                               for stratum, counts in sorted(coverage["by_stratum"].items()))), ""]
+    rows_by_id = {row["concept_id"]: row for row in rows}
+    lines += ["Selected few-shot concepts (set | en | vi | ru | stratum):", "", "```text"]
+    for set_number, ids in sorted(fewshot_metadata["fewshot_sets"].items(), key=lambda item: int(item[0])):
+        for concept_id in ids:
+            row = rows_by_id.get(concept_id)
+            if row is None:
+                raise ValueError(f"Selected few-shot concept {concept_id!r} is absent from release parquet")
+            lines.append(" | ".join((set_number, row["en_lemma"], row["vi_canonical"],
+                                      row.get("ru_canonical") or "", row["stratum"])))
+    lines += ["```", ""]
 
     lines += ["## Sources", "", "See the full file-level table in [SOURCES.md](../build/SOURCES.md).", ""]
     return "\n".join(lines)
@@ -534,7 +593,7 @@ def build_licenses(sources: list[dict[str, str]]) -> str:
     ])
 
 
-def _read_latest_inputs(config: dict[str, Any], logger: logging.Logger) -> tuple[list[dict[str, Any]], list[dict[str, str]], list[dict[str, Any]], dict[tuple[str, str, str], int], set[str]]:
+def _read_latest_inputs(config: dict[str, Any], logger: logging.Logger) -> tuple[list[dict[str, Any]], list[dict[str, str]], list[dict[str, Any]], dict[str, Any]]:
     """Load all mandatory release evidence before any output file is written."""
     release = config["release"]
     paths = {name: Path(value) for name, value in release["paths"].items()}
@@ -571,12 +630,44 @@ def _read_latest_inputs(config: dict[str, Any], logger: logging.Logger) -> tuple
         raise FileNotFoundError(f"Step 14 requires provenance: missing {paths['sources']}")
     sources = _read_pipe_table(paths["sources"])
     dropflow = latest_dropflow_records(paths["dropflow"])
-    fewshot_path = paths["logs_dir"] / "12_prompts.log"
-    fewshot_sets = _read_fewshot_sets(fewshot_path)
-    cloze_path = paths["prompts_dir"] / f"cloze_diac_set{config['prompts']['fewshot']['primary_set']}.jsonl"
-    cloze_ids = _read_cloze_ids(cloze_path)
+    fewshot_path = Path(config["prompts"]["paths"]["fewshot_metadata"])
+    fewshot_metadata = _read_fewshot_metadata(fewshot_path)
+    row_ids = set(ids)
+    selected_ids = set(fewshot_metadata["fewshot_set_by_id"])
+    missing_selected = sorted(selected_ids - row_ids)
+    if missing_selected:
+        raise ValueError(f"Step-12 metadata selects IDs absent from release parquet: {missing_selected[:10]!r}")
+    rows_by_id = {row["concept_id"]: row for row in rows}
+    wrong_fewshot_split = sorted(concept_id for concept_id in selected_ids
+                                 if rows_by_id[concept_id].get("split") != "fewshot_reservoir")
+    if wrong_fewshot_split:
+        raise ValueError(f"Step-12 metadata few-shot IDs are not in the reservoir: {wrong_fewshot_split[:10]!r}")
+    cloze_ids = set(fewshot_metadata["test_cloze_concept_ids"])
+    missing_cloze = sorted(cloze_ids - row_ids)
+    wrong_cloze_split = sorted(concept_id for concept_id in cloze_ids & row_ids
+                               if rows_by_id[concept_id].get("split") != "test")
+    if missing_cloze or wrong_cloze_split:
+        raise ValueError(f"Step-12 metadata has invalid test cloze IDs: missing={missing_cloze[:10]!r}; "
+                         f"wrong_split={wrong_cloze_split[:10]!r}")
+    main_rows = [row for row in rows if row.get("split") == "test" and row.get("m1_extension") is False]
+    listed_main_cloze = {concept_id for concept_id in cloze_ids
+                         if rows_by_id[concept_id].get("m1_extension") is False}
+    coverage = fewshot_metadata["main_test_cloze_coverage"]
+    if len(main_rows) != coverage["n_test"] or len(listed_main_cloze) != coverage["n_available"]:
+        raise ValueError("Step-12 main-test cloze coverage does not match the structured release parquet")
+    main_by_stratum: dict[str, dict[str, int]] = {}
+    for row in main_rows:
+        stratum = row["stratum"]
+        counts = main_by_stratum.setdefault(stratum, {"n_available": 0, "n_test": 0})
+        counts["n_test"] += 1
+        counts["n_available"] += row["concept_id"] in cloze_ids
+    if main_by_stratum != coverage["by_stratum"]:
+        raise ValueError("Step-12 per-stratum cloze coverage does not match the structured release parquet")
     logger.info("Validated step-12 rows=%d, dropflow records=%d, source rows=%d", len(rows), len(dropflow), len(sources))
-    return rows, sources, dropflow, fewshot_sets, cloze_ids
+    logger.info("Validated structured step-12 few-shot sets=%d, cloze status=%s, main-test cloze=%d/%d",
+                len(fewshot_metadata["fewshot_sets"]), fewshot_metadata["cloze_status"],
+                coverage["n_available"], coverage["n_test"])
+    return rows, sources, dropflow, fewshot_metadata
 
 
 def _write_text_atomic(path: Path, text: str) -> None:
@@ -625,16 +716,18 @@ def run(config_path: str | Path) -> dict[str, Any]:
     started = time.monotonic()
     config = load_config(config_path)
     logger = setup_logging(STEP, config["paths"]["logs"], level=config.get("logging", {}).get("level", "INFO"))
-    rows, sources, dropflow, fewshot_sets, cloze_ids = _read_latest_inputs(config, logger)
+    rows, sources, dropflow, fewshot_metadata = _read_latest_inputs(config, logger)
     model_keys = list(config["models"])
     columns = release_columns(config["langs"], model_keys)
+    cloze_ids = set(fewshot_metadata["test_cloze_concept_ids"])
     projected = [project_release_row(row, columns=columns,
-                                     fewshot_sets=fewshot_sets, cloze_ids=cloze_ids) for row in rows]
+                                     fewshot_sets=fewshot_metadata["fewshot_set_by_id"],
+                                     cloze_ids=cloze_ids) for row in rows]
     commit_hash = _pipeline_commit(Path(config_path))
     tsv = render_concepts_tsv(projected, columns, commit_hash)
     release_paths = {name: Path(value) for name, value in config["release"]["paths"].items()}
     agreement = build_agreement(
-        rows, dropflow=dropflow, sources=sources, config=config, logs_dir=release_paths["logs_dir"],
+        rows, dropflow=dropflow, sources=sources, config=config, fewshot_metadata=fewshot_metadata,
         fertility_path=release_paths["fertility"], flores_path=release_paths["flores_directions"],
         protocol_path=release_paths["protocol"],
     )

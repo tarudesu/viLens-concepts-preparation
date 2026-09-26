@@ -375,6 +375,64 @@ def _atomic_write_jsonl(rows: list[dict[str, Any]], path: Path) -> None:
             os.unlink(temporary)
 
 
+def _atomic_write_json(payload: dict[str, Any], path: Path) -> None:
+    """Write deterministic UTF-8 JSON atomically."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", dir=path.parent,
+                                         prefix=f".{path.name}.", suffix=".tmp", delete=False) as handle:
+            temporary = handle.name
+            json.dump(payload, handle, ensure_ascii=False, sort_keys=True, indent=2)
+            handle.write("\n")
+        os.replace(temporary, path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def build_fewshot_metadata(
+    fewshot_sets: dict[int, list[dict[str, Any]]], *, cloze_demonstration_ids: list[str],
+    test_rows: list[dict[str, Any]], main_test_rows: list[dict[str, Any]],
+    masked_by_id: dict[str, str | None], cloze_status: str,
+) -> dict[str, Any]:
+    """Build the structured release evidence emitted alongside step-12 prompts."""
+    if cloze_status not in {"primary", "supplementary"}:
+        raise ValueError(f"Unexpected cloze status: {cloze_status!r}")
+    set_ids: dict[str, list[str]] = {}
+    selected_ids: list[str] = []
+    for set_number, group in sorted(fewshot_sets.items()):
+        ids = [str(row["concept_id"]) for row in group]
+        if any(not value for value in ids) or len(ids) != len(set(ids)):
+            raise ValueError(f"Few-shot set {set_number} has missing or duplicate concept IDs")
+        set_ids[str(set_number)] = ids
+        selected_ids.extend(ids)
+    if len(selected_ids) != len(set(selected_ids)):
+        raise ValueError("A concept occurs in more than one selected few-shot set")
+    available_test_ids = sorted(row["concept_id"] for row in test_rows
+                                if masked_by_id.get(row["concept_id"]) is not None)
+    main_test_counts = Counter(row["stratum"] for row in main_test_rows)
+    main_cloze_counts = Counter(row["stratum"] for row in main_test_rows
+                                if masked_by_id.get(row["concept_id"]) is not None)
+    strata = sorted(set(main_test_counts) | set(main_cloze_counts))
+    return {
+        "schema_version": 1,
+        "fewshot_sets": set_ids,
+        "cloze_demonstration_concept_ids": list(cloze_demonstration_ids),
+        "test_cloze_concept_ids": available_test_ids,
+        "cloze_status": cloze_status,
+        "main_test_cloze_coverage": {
+            "n_available": len([row for row in main_test_rows
+                                 if masked_by_id.get(row["concept_id"]) is not None]),
+            "n_test": len(main_test_rows),
+            "by_stratum": {
+                stratum: {"n_available": main_cloze_counts[stratum], "n_test": main_test_counts[stratum]}
+                for stratum in strata
+            },
+        },
+    }
+
+
 def _remove_step_dropflow(path: Path) -> None:
     """Remove old step-12 dropflow records before a rerun."""
     if not path.exists():
@@ -683,6 +741,14 @@ def run(config_path: str | Path) -> dict[str, Any]:
             "Configured prompts.cloze.cloze_status does not match the main-test result: "
             f"configured={configured_cloze_role!r}, computed={cloze_role!r}"
         )
+    cloze_demo_ids = [row["concept_id"] for row in selected
+                      if masked_by_id.get(row["concept_id"]) is not None][:cloze_k]
+    metadata = build_fewshot_metadata(
+        fewshot_sets, cloze_demonstration_ids=cloze_demo_ids, test_rows=test_rows,
+        main_test_rows=main_test_rows, masked_by_id=masked_by_id, cloze_status=cloze_role,
+    )
+    _atomic_write_json(metadata, paths["fewshot_metadata"])
+    logger.info("Wrote structured few-shot/cloze metadata: %s", paths["fewshot_metadata"])
     logger.info("Cloze coverage all TEST=%d; MAIN TEST=%d/%d; threshold=%d; cloze_status=%s",
                 len(test_cloze_rows), len(main_cloze_rows), len(main_test_rows), threshold, cloze_role)
     logger.info("NLLB Russian calls=%d; cache hits=%d", translator.translation_calls, translator.cache_hits)
@@ -708,7 +774,8 @@ def run(config_path: str | Path) -> dict[str, Any]:
             "ru_agreement_test": (len(test_ru_agree_rows), len(test_candidate_rows)),
             "fewshot": selected, "file_counts": {name: len(rows) for name, rows in file_rows.items()},
             "cloze_test_n": len(test_cloze_rows), "cloze_main_test_n": len(main_cloze_rows),
-            "cloze_role": cloze_role, "runtime_seconds": runtime}
+            "cloze_role": cloze_role, "metadata_path": str(paths["fewshot_metadata"]),
+            "runtime_seconds": runtime}
 
 
 def main() -> None:

@@ -288,8 +288,6 @@ release:
     qa_sample: data/interim/qa_sample.txt
     fertility: data/interim/e1_fertility.csv
     flores_directions: data/prompts/directions_flores.jsonl
-    prompts_dir: data/prompts
-    logs_dir: data/interim/logs
 
 diacritics:
   wordfreq_top_n: 50000 # wordfreq returns its complete Vietnamese vocabulary (10,622 entries)
@@ -338,6 +336,7 @@ prompts:
     main_step11: data/interim/11_diac.parquet
     extension: data/interim/11_m1_ext.parquet
     ru_output: data/interim/12_ru.parquet
+    fewshot_metadata: data/interim/12_fewshot.json
     output_dir: data/prompts
 
 direction_prompts:

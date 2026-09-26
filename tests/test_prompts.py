@@ -88,6 +88,35 @@ def test_cloze_demonstrations_use_seeded_selected_pool_across_sets() -> None:
     ]
 
 
+def test_structured_fewshot_metadata_contains_ids_and_main_test_cloze_coverage(tmp_path) -> None:
+    selected = {1: [{"concept_id": "few-a"}, {"concept_id": "few-b"}],
+                2: [{"concept_id": "few-c"}]}
+    test_rows = [
+        {"concept_id": "test-a", "stratum": "sino"},
+        {"concept_id": "test-b", "stratum": "sino"},
+        {"concept_id": "test-c", "stratum": "nonsino"},
+    ]
+    main_test_rows = test_rows[:2]
+    payload = prompts.build_fewshot_metadata(
+        selected, cloze_demonstration_ids=["few-a"], test_rows=test_rows,
+        main_test_rows=main_test_rows,
+        masked_by_id={"few-a": "masked", "test-a": "masked", "test-c": "masked"},
+        cloze_status="primary",
+    )
+    assert payload["fewshot_sets"] == {"1": ["few-a", "few-b"], "2": ["few-c"]}
+    assert payload["cloze_demonstration_concept_ids"] == ["few-a"]
+    assert payload["test_cloze_concept_ids"] == ["test-a", "test-c"]
+    assert payload["main_test_cloze_coverage"] == {
+        "n_available": 1, "n_test": 2,
+        "by_stratum": {"sino": {"n_available": 1, "n_test": 2}},
+    }
+    path = tmp_path / "12_fewshot.json"
+    prompts._atomic_write_json(payload, path)
+    first = path.read_bytes()
+    prompts._atomic_write_json(payload, path)
+    assert path.read_bytes() == first
+
+
 def test_nodiac_translation_strips_vietnamese_but_preserves_russian_and_case() -> None:
     examples = [{"ru": "ёж", "vi": "Tiếng Việt"}, {"ru": "дом", "vi": "Đường phố"}]
     diac = prompts.render_translation_prompt(
