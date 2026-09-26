@@ -6,7 +6,7 @@ BUILD_DIR := $(shell $(PYTHON) -B -c 'from data.build.common import load_config;
 ifeq ($(strip $(BUILD_DIR)),)
 $(error Unable to read paths.build from $(CONFIG))
 endif
-STEP_SCRIPTS := $(sort $(wildcard $(BUILD_DIR)/[0-9][0-9]_*.py))
+STEP_SCRIPTS := $(sort $(wildcard $(BUILD_DIR)/[0-9][0-9]_*.py $(BUILD_DIR)/[0-9][0-9][a-z]_*.py))
 STEP_NUMBERS := $(foreach script,$(STEP_SCRIPTS),$(firstword $(subst _, ,$(notdir $(script)))))
 STEP_TARGETS := $(addprefix step-,$(STEP_NUMBERS))
 
