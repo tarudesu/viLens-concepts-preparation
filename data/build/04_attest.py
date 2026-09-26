@@ -489,14 +489,16 @@ class ActionAPIClient:
         self.failures += 1
         raise RuntimeError(f"Action API request failed after {max_attempts} attempts ({params.get('action')}): {last_error}")
 
-    def fetch_pairs(self, lemmas: list[str], candidate_pairs: set[tuple[str, str]]) -> set[tuple[str, str]]:
+    def fetch_pairs(
+        self, lemmas: list[str], candidate_pairs: set[tuple[str, str]], progress_every: int
+    ) -> set[tuple[str, str]]:
         """Search exact English terms, fetch matching entities, return attested pairs."""
         lemma_qids: dict[str, list[str]] = {}
         for index, lemma in enumerate(lemmas, start=1):
             payload = self._get({"action": "wbsearchentities", "search": lemma, "language": "en",
                                  "type": "item", "limit": str(self.config["api_search_limit"]), "format": "json"})
             lemma_qids[lemma] = exact_english_qids(payload, lemma)
-            if index % 25 == 0 or index == len(lemmas):
+            if index % progress_every == 0 or index == len(lemmas):
                 self.logger.info("Action API English searches: %d/%d; physical calls=%d cache_hits=%d",
                                  index, len(lemmas), self.requests, self.cache_hits)
         qid_to_lemmas: dict[str, set[str]] = defaultdict(set)
@@ -508,11 +510,17 @@ class ActionAPIClient:
         if not 1 <= entity_batch_size <= 50:
             raise ValueError(f"wikidata.entity_batch_size must be in [1, 50], got {entity_batch_size}")
         qid_terms: dict[str, set[str]] = {}
+        last_logged_batch = 0
         for offset in range(0, len(qids), entity_batch_size):
             batch = qids[offset:offset + entity_batch_size]
             payload = self._get({"action": "wbgetentities", "ids": "|".join(batch), "props": "labels|aliases",
                                  "languages": "en|vi", "format": "json"})
             qid_terms.update(vietnamese_entity_terms(payload, batch))
+            processed = offset + len(batch)
+            if processed // progress_every > last_logged_batch or processed == len(qids):
+                last_logged_batch = processed // progress_every
+                self.logger.info("Action API entity QIDs: %d/%d; physical calls=%d cache_hits=%d",
+                                 processed, len(qids), self.requests, self.cache_hits)
         return {
             (_fold(lemma), vi_term)
             for qid, terms in qid_terms.items()
@@ -597,6 +605,9 @@ def run(config_path: str) -> dict[str, Any]:
         if attempts < 1:
             raise ValueError("wikidata.max_retries must be at least one")
         minimum_sources = int(config["filters"]["min_sources"])
+        progress_every = int(config["logging"]["progress_every"])
+        if progress_every < 1:
+            raise ValueError("logging.progress_every must be at least one")
         source_flags = {
             "wiktextract_table": "in_wiktextract",
             "vi_gloss": "in_vi_gloss",
@@ -678,14 +689,15 @@ def run(config_path: str) -> dict[str, Any]:
                 if not 1 <= int(settings["api_search_limit"]) <= 10:
                     raise ValueError("wikidata.api_search_limit must be in [1, 10]")
                 client = ActionAPIClient(settings, Path(attest_paths["wikidata_cache"]), logger)
-                wikidata_pairs = client.fetch_pairs(lemmas, candidate_pairs)
+                wikidata_pairs = client.fetch_pairs(lemmas, candidate_pairs, progress_every)
                 logger.info("Action API exact VI-attested lemma-candidate pairs: %d", len(wikidata_pairs))
-                date = datetime.now(timezone.utc).date().isoformat()
-                sources = Path(paths["sources"])
-                note = f"Wikidata Action API query date: {date} UTC; cached responses in data/raw/wikidata_cache/ (per-request SHA-1 keys)."
-                current = sources.read_text(encoding="utf-8")
-                if note not in current:
-                    sources.write_text(current.rstrip() + "\n\n" + note + "\n", encoding="utf-8", newline="\n")
+                if client.requests:
+                    date = datetime.now(timezone.utc).date().isoformat()
+                    sources = Path(paths["sources"])
+                    note = f"Wikidata Action API query date: {date} UTC; cached responses in data/raw/wikidata_cache/ (per-request SHA-1 keys)."
+                    current = sources.read_text(encoding="utf-8")
+                    if note not in current:
+                        sources.write_text(current.rstrip() + "\n\n" + note + "\n", encoding="utf-8", newline="\n")
             else:
                 client = WikidataClient(settings, Path(attest_paths["wikidata_cache"]), logger)
                 n_batches = (len(lemmas) + batch_size - 1) // batch_size

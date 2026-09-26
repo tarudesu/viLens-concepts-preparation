@@ -1,0 +1,7 @@
+[
+  {"concept_id":"c001","en_lemma":"cat","pos":"noun","vi_cands":[{"word":"con mèo","n_sources":3,"external_attested":true}],"zh_cands":[{"word":"猫"}],"fr_cands":[{"word":"chat"}],"id_cands":[{"word":"kucing"}]},
+  {"concept_id":"c002","en_lemma":"feline","pos":"noun","vi_cands":[{"word":"con mèo","n_sources":3,"external_attested":true}],"zh_cands":[{"word":"猫科动物"}],"fr_cands":[{"word":"félin"}],"id_cands":[{"word":"felidae"}]},
+  {"concept_id":"c003","en_lemma":"cat","pos":"noun","vi_cands":[{"word":"mèo","n_sources":3,"external_attested":true}],"zh_cands":[{"word":"猫"}],"fr_cands":[{"word":"chat"}],"id_cands":[{"word":"kucing"}]},
+  {"concept_id":"c004","en_lemma":"run","pos":"verb","vi_cands":[{"word":"chạy","n_sources":2,"external_attested":false}],"zh_cands":[{"word":"跑"}],"fr_cands":[{"word":"courir"}],"id_cands":[{"word":"berlari"}]},
+  {"concept_id":"c005","en_lemma":"walk","pos":"verb","vi_cands":[{"word":"đi bộ","n_sources":3,"external_attested":true}],"zh_cands":[{"word":"走路"}],"fr_cands":[{"word":"marcher"}],"id_cands":[{"word":"berjalan"}]}
+]

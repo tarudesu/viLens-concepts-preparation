@@ -29,8 +29,21 @@ attest:
     muse_en_vi: data/raw/muse/en-vi.txt
     wikidata_cache: data/raw/wikidata_cache
 
+split:
+  component_max_size: 5
+  syllable_bins: [1, 2] # 1, 2, and 3+ whitespace-separated Vietnamese syllables
+  syllable_source: first_vi_candidate
+  parquet_row_group_size: 65536
+  paths:
+    input: data/interim/04_attested.parquet
+    output: data/interim/05_split.parquet
+    fewshot_reservoir: data/interim/05_fewshot_reservoir.parquet
+    directions: data/interim/05_directions.parquet
+    test_pool: data/interim/05_test_pool.parquet
+
 logging:
   level: INFO
+  progress_every: 500
 
 chinese:
   lang_code: cmn
@@ -45,9 +58,11 @@ pool:
   max_item_drop_rate: 0.02
 
 heldout:
-  fewshot_n: 30
-  directions_n: 200
-  stratify_by: pos
+  fewshot_reservoir_n: 80
+  fewshot_final_n: 30
+  directions_n: 220
+  stratify_by: [pos, syllable_bucket]
+  fewshot_min_en_zipf_tercile: top
 
 filters:
   min_sources: 2
