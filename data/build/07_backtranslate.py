@@ -66,6 +66,49 @@ def pass_rule(canonical: str, alternatives: list[str], outputs: list[str], *, la
     return False, "none"
 
 
+def norm_vi(value: str) -> str:
+    """NFC/casefold Vietnamese output, remove punctuation, and collapse whitespace."""
+    if not isinstance(value, str):
+        raise TypeError(f"norm_vi expects str, got {type(value).__name__}")
+    text = normalize_nfc(value).casefold()
+    text = "".join(char for char in text if not unicodedata.category(char).startswith("P"))
+    return " ".join(text.split())
+
+
+def contains(target: str, output: str, *, max_extra_syllables: int) -> bool:
+    """Test whether target syllables form a bounded-length contiguous output span."""
+    if type(max_extra_syllables) is not int or max_extra_syllables < 0:
+        raise ValueError("max_extra_syllables must be a non-negative integer")
+    target_tokens = norm_vi(target).split()
+    output_tokens = norm_vi(output).split()
+    if not target_tokens or len(output_tokens) > len(target_tokens) + max_extra_syllables:
+        return False
+    width = len(target_tokens)
+    return any(output_tokens[index:index + width] == target_tokens for index in range(len(output_tokens) - width + 1))
+
+
+def clean_second_hop(value: str, *, pos: str) -> str:
+    """Remove terminal punctuation and leading English articles/verb marker."""
+    text = normalize_nfc(value).strip()
+    while text and unicodedata.category(text[-1]).startswith("P"):
+        text = text[:-1].rstrip()
+    text = re.sub(r"^(?:the|a|an)\s+", "", text, count=1, flags=re.IGNORECASE)
+    if pos == "verb":
+        text = re.sub(r"^to\s+", "", text, count=1, flags=re.IGNORECASE)
+    return text.strip()
+
+
+def containment_match(targets: list[str], outputs: list[str], *, max_extra_syllables: int) -> tuple[str, str | None]:
+    """Return canonical/alt/none and the first output containing any target."""
+    if targets and any(contains(targets[0], output, max_extra_syllables=max_extra_syllables) for output in outputs):
+        return "canonical", next(output for output in outputs if contains(targets[0], output, max_extra_syllables=max_extra_syllables))
+    for target in targets[1:]:
+        for output in outputs:
+            if contains(target, output, max_extra_syllables=max_extra_syllables):
+                return "alt", output
+    return "none", None
+
+
 def select_part_b(provisional: str, alternatives: list[str], outputs: list[str], *, language: str, pos: str, opencc: OpenCC) -> tuple[str, bool, bool, list[str]]:
     """Select the candidate with the earliest matching NLLB beam; ties retain provisional order."""
     candidates = [provisional, *alternatives]
@@ -251,28 +294,45 @@ def process_rows(rows: list[dict[str, Any]], *, translator: TranslationProvider,
     per_row_en: dict[str, list[str]] = {row["concept_id"]: en_results[(code["vi"], code["en"], row["vi_canonical"])] for row in ordered_rows}
 
     back_requests: list[tuple[str, str, str]] = []
+    second_hop_texts: dict[str, list[str]] = {}
     for row in ordered_rows:
-        back_requests.extend((code["en"], code["vi"], output) for output in per_row_en[row["concept_id"]])
+        variants = []
+        for output in per_row_en[row["concept_id"]]:
+            for variant in (output, clean_second_hop(output, pos=row["pos"])):
+                if variant and variant not in variants:
+                    variants.append(variant)
+                    back_requests.append((code["en"], code["vi"], variant))
+        second_hop_texts[row["concept_id"]] = variants
     back_results = translator.translate_many(back_requests)
 
+    forward_requests = [(code["en"], code["vi"], row["en_lemma"]) for row in ordered_rows]
+    forward_results = translator.translate_many(forward_requests)
+
     pass_by_id: dict[str, bool] = {}
-    bt_counts: Counter[str] = Counter()
-    match_counts: Counter[str] = Counter()
+    route_counts: Counter[str] = Counter()
     en_hits = 0
+    max_extra = int(config["bt"]["max_extra_syllables"])
     for row in ordered_rows:
         en_outs = per_row_en[row["concept_id"]]
-        back_by_en = [back_results[(code["en"], code["vi"], output)] for output in en_outs]
-        vi_back = [item for group in back_by_en for item in group]
-        passed, match = pass_rule(row["vi_canonical"], row["vi_alts"], vi_back, language="vi", pos=row["pos"], opencc=converter)
-        top1_pass = bool(back_by_en and back_by_en[0] and norm(back_by_en[0][0], language="vi", pos=row["pos"], opencc=converter) == norm(row["vi_canonical"], language="vi", pos=row["pos"], opencc=converter))
+        original_outputs = [item for output in en_outs for item in back_results[(code["en"], code["vi"], output)]]
+        vi_back = list(dict.fromkeys(item for text in second_hop_texts[row["concept_id"]] for item in back_results[(code["en"], code["vi"], text)]))
+        fwd_outs = forward_results[(code["en"], code["vi"], row["en_lemma"])]
+        targets = [row["vi_canonical"], *row["vi_alts"]]
+        strict_pass, _ = pass_rule(row["vi_canonical"], row["vi_alts"], original_outputs, language="vi", pos=row["pos"], opencc=converter)
+        rt_match, rt_output = containment_match(targets, vi_back, max_extra_syllables=max_extra)
+        fwd_match, fwd_output = containment_match(targets, fwd_outs, max_extra_syllables=max_extra)
+        route = "strict" if strict_pass else "rt_contain" if rt_match != "none" else "fwd_only" if fwd_match != "none" else "none"
+        passed = route != "none"
+        match = rt_match if rt_match != "none" else fwd_match
+        matching_output = rt_output if rt_output is not None else fwd_output
+        top1_pass = bool(original_outputs and norm(original_outputs[0], language="vi", pos=row["pos"], opencc=converter) == norm(row["vi_canonical"], language="vi", pos=row["pos"], opencc=converter))
         en_hit = norm(row["en_lemma"], language="en", pos=row["pos"], opencc=converter) in {norm(item, language="en", pos=row["pos"], opencc=converter) for item in en_outs}
-        row.update({"en_outs": en_outs, "vi_back": vi_back, "bt_pass": passed, "bt_match": match, "bt_pass_top1": top1_pass, "en_hit": en_hit})
+        row.update({"en_outs": en_outs, "vi_back": vi_back, "fwd_outs": fwd_outs, "bt_pass": passed, "bt_pass_strict_v1": strict_pass, "rt_contain": rt_match != "none", "fwd_hit": fwd_match != "none", "bt_route": route, "bt_matching_output": matching_output, "bt_match": match, "bt_pass_top1": top1_pass, "en_hit": en_hit})
         pass_by_id[row["concept_id"]] = passed
-        bt_counts[row["pos"]] += int(passed)
-        match_counts[match] += 1
+        route_counts[route] += 1
         en_hits += int(en_hit)
 
-    survivors = [row for row in ordered_rows if pass_by_id[row["concept_id"]]]
+    survivors = [row for row in ordered_rows if pass_by_id[row["concept_id"]] or row["split"] == "directions"]
     other_requests = [
         (code["en"], code[language], row["en_lemma"])
         for row in survivors for language in ("zh", "fr", "id")
@@ -292,12 +352,12 @@ def process_rows(rows: list[dict[str, Any]], *, translator: TranslationProvider,
             row[f"{language}_alts"] = alternatives
 
     for row in ordered_rows:
-        if not pass_by_id[row["concept_id"]]:
+        if not pass_by_id[row["concept_id"]] and row["split"] != "directions":
             for language in ("zh", "fr", "id"):
                 row[f"{language}_outs"] = None
                 row[f"{language}_nllb_agree"] = None
                 row[f"{language}_canonical_changed"] = None
-    info = {"pass_by_id": pass_by_id, "match_counts": match_counts, "en_hits": en_hits, "survivors": survivors}
+    info = {"pass_by_id": pass_by_id, "route_counts": route_counts, "en_hits": en_hits, "survivors": survivors}
     return ordered_rows, {split: [row for row in ordered_rows if row["split"] == split] for split in SPLITS}, info
 
 
@@ -330,6 +390,9 @@ def _output_schema(schema: pa.Schema) -> pa.Schema:
     additions = [
         pa.field("en_outs", pa.list_(pa.string())), pa.field("vi_back", pa.list_(pa.string())),
         pa.field("bt_pass", pa.bool_()), pa.field("bt_match", pa.string()),
+        pa.field("bt_pass_strict_v1", pa.bool_()), pa.field("rt_contain", pa.bool_()),
+        pa.field("fwd_hit", pa.bool_()), pa.field("bt_route", pa.string()),
+        pa.field("bt_matching_output", pa.string()), pa.field("fwd_outs", pa.list_(pa.string())),
         pa.field("bt_pass_top1", pa.bool_()), pa.field("en_hit", pa.bool_()),
     ]
     for language in ("zh", "fr", "id"):
@@ -372,15 +435,20 @@ def run(config_path: str) -> dict[str, Any]:
             raise ValueError("Step 07 requires config num_beams=num_return=5")
         if int(nllb["max_new_tokens"]) < 1 or int(nllb["batch_size"]) < 1 or nllb["do_sample"] is not False:
             raise ValueError("Invalid NLLB generation config")
-        nllb = {**nllb, "progress_every": int(config["logging"]["progress_every"])}
+        nllb = {**nllb, "progress_every": int(config["logging"]["progress_every"]), "bt": settings["bt"]}
         expected_codes = {"vi": "vie_Latn", "en": "eng_Latn", "zh": "zho_Hans", "fr": "fra_Latn", "id": "ind_Latn"}
         if nllb["lang_codes"] != expected_codes:
             raise ValueError(f"Unexpected nllb.lang_codes: {nllb['lang_codes']!r}")
         report = settings["report"]
         sample_n = int(report["failure_sample_n"])
+        new_pass_sample_n = int(report["new_pass_sample_n"])
+        still_fail_sample_n = int(report["still_fail_sample_n"])
         change_n = int(report["change_examples_n"])
-        if sample_n < 0 or change_n < 0:
+        if min(sample_n, new_pass_sample_n, still_fail_sample_n, change_n) < 0:
             raise ValueError("NLLB report sample sizes must be non-negative")
+        bt_config = settings.get("bt", {})
+        if type(bt_config.get("max_extra_syllables")) is not int or bt_config["max_extra_syllables"] < 0:
+            raise ValueError("backtranslate.bt.max_extra_syllables must be a non-negative integer")
         input_path = Path(settings["paths"]["input"])
         table = pq.read_table(input_path)
         required = {"concept_id", "en_lemma", "pos", "split", "vi_canonical", "vi_alts", "zh_canonical", "zh_alts", "fr_canonical", "fr_alts", "id_canonical", "id_alts"}
@@ -411,50 +479,41 @@ def run(config_path: str) -> dict[str, Any]:
         flow = DropflowLogger(dropflow_path)
         for split in SPLITS:
             before = [row for row in processed if row["split"] == split]
-            after = [row for row in before if row["bt_pass"]]
+            after = before if split == "directions" else [row for row in before if row["bt_pass"]]
             by_pos = Counter(row["pos"] for row in after)
             flow.record(step="07", stage=f"filter2_backtranslation_{split}", unit="concepts", n_in=len(before), n_out=len(after), n_out_by_pos=dict(sorted(by_pos.items())))
             logger.info("filter2_backtranslation_%s | n_in=%d | n_out=%d | n_out_by_pos=%s", split, len(before), len(after), json.dumps(dict(sorted(by_pos.items())), sort_keys=True))
 
         test_rows = rows_by_split["test"]
-        logger.info("TEST bt_pass rates by POS:")
-        by_pos: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        by_bucket: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        logger.info("TEST filter-2 rates by POS x syllable bucket (denominator = concepts):")
         metrics: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
         for row in test_rows:
             bucket = syllable_bucket(row["vi_canonical"], edges)
-            by_pos[row["pos"]].append(row)
-            by_bucket[bucket].append(row)
             metrics[(row["pos"], bucket)].append(row)
-        for pos, group in sorted(by_pos.items()):
-            n = len(group)
-            passed = sum(bool(row["bt_pass"]) for row in group)
-            top1 = sum(bool(row["bt_pass_top1"]) for row in group)
-            logger.info("%s | n=%d | bt_pass=%d (%.6f) | bt_pass_top1=%d (%.6f)", pos, n, passed, passed / n, top1, top1 / n)
-        logger.info("TEST bt_pass rates by syllable bucket:")
-        for bucket, group in sorted(by_bucket.items()):
-            n = len(group)
-            passed = sum(bool(row["bt_pass"]) for row in group)
-            top1 = sum(bool(row["bt_pass_top1"]) for row in group)
-            logger.info("%s | n=%d | bt_pass=%d (%.6f) | bt_pass_top1=%d (%.6f)", bucket, n, passed, passed / n, top1, top1 / n)
-        logger.info("TEST bt_pass rates by POS x syllable bucket:")
         for (pos, bucket), group in sorted(metrics.items()):
             n = len(group)
-            passed = sum(bool(row["bt_pass"]) for row in group)
-            top1 = sum(bool(row["bt_pass_top1"]) for row in group)
-            logger.info("%s | %s | n=%d | bt_pass=%d (%.6f) | bt_pass_top1=%d (%.6f)", pos, bucket, n, passed, passed / n, top1, top1 / n)
+            rates = {key: sum(bool(row[field]) for row in group) / n for key, field in (("strict_v1", "bt_pass_strict_v1"), ("rt_contain", "rt_contain"), ("fwd_hit", "fwd_hit"), ("bt_pass", "bt_pass"))}
+            logger.info("%s | %s | n=%d | strict_v1=%.6f | rt_contain=%.6f | fwd_hit=%.6f | bt_pass=%.6f", pos, bucket, n, rates["strict_v1"], rates["rt_contain"], rates["fwd_hit"], rates["bt_pass"])
 
+        logger.info("bt_route distribution: %s", json.dumps(dict(sorted(info["route_counts"].items())), sort_keys=True))
         total = len(processed)
-        logger.info("bt_match distribution: %s", json.dumps(dict(sorted(info["match_counts"].items())), sort_keys=True))
         logger.info("en_hit rate: %d/%d (%.6f)", info["en_hits"], total, info["en_hits"] / total if total else 0.0)
+        newly_passed = [row for row in test_rows if row["bt_pass"] and not row["bt_pass_strict_v1"]]
+        if newly_passed:
+            chosen = [newly_passed[index] for index in sorted(rng.choice(len(newly_passed), size=min(new_pass_sample_n, len(newly_passed)), replace=False).tolist())]
+        else:
+            chosen = []
+        logger.info("TEST new passers sample=%d of %d (vi | en_lemma | route | matching output):", len(chosen), len(newly_passed))
+        for row in chosen:
+            logger.info("%s | %s | %s | %s", row["vi_canonical"], row["en_lemma"], row["bt_route"], row["bt_matching_output"])
         failures = [row for row in test_rows if not row["bt_pass"]]
         if failures:
-            selected = [failures[index] for index in sorted(rng.choice(len(failures), size=min(sample_n, len(failures)), replace=False).tolist())]
+            selected = [failures[index] for index in sorted(rng.choice(len(failures), size=min(still_fail_sample_n, len(failures)), replace=False).tolist())]
         else:
             selected = []
-        logger.info("TEST backtranslation failures sampled=%d of %d (vi | en_outs | top 5 vi_back):", len(selected), len(failures))
+        logger.info("TEST still-fail sample=%d of %d (vi | en_lemma | top 3 fwd | top 3 vi_back):", len(selected), len(failures))
         for row in selected:
-            logger.info("%s | %s | %s", row["vi_canonical"], json.dumps(row["en_outs"], ensure_ascii=False), json.dumps(row["vi_back"][:5], ensure_ascii=False))
+            logger.info("%s | %s | %s | %s", row["vi_canonical"], row["en_lemma"], json.dumps(row["fwd_outs"][:3], ensure_ascii=False), json.dumps(row["vi_back"][:3], ensure_ascii=False))
 
         changed_by_lang: dict[str, list[dict[str, Any]]] = {}
         for language in ("zh", "fr", "id"):

@@ -16,3 +16,8 @@ v1.2 (2026-09-26; pre-data; no model outputs exist at the time of this amendment
   after inspecting items around 0.30 (predominantly loans). Added a hyphenated-
   transliteration filter. Pre-declared robustness check: primary results
   re-run excluding min_surface_dist < 0.60.
+- §4.3 filter 2: pass = round-trip
+  whole-syllable containment (≤ +4 syllables) OR forward en→vi hit. Reason: NLLB
+  hallucinates on isolated words, and exact-match round-trip failed 71% of
+  monosyllables vs 47% of disyllables. Pre-declared robustness subset:
+  bt_pass_strict_v1. Directions pool exempt from filter 2.

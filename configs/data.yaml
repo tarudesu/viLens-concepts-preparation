@@ -116,11 +116,15 @@ nllb:
   test_target_lang: eng_Latn
 
 backtranslate:
+  bt:
+    max_extra_syllables: 4
   paths:
     input: data/interim/06_filtered.parquet
     output: data/interim/07_bt.parquet
   report:
     failure_sample_n: 30
+    new_pass_sample_n: 30
+    still_fail_sample_n: 20
     change_examples_n: 20
     prioritize_en_lemmas: [fourth, sixth]
     syllable_bins: [1, 2]

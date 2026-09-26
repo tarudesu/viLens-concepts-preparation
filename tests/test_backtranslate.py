@@ -29,6 +29,19 @@ def test_backtranslation_pass_canonical_alternative_or_none() -> None:
     assert step07.pass_rule("mèo", ["miêu"], ["cat"], language="vi", pos="noun", opencc=converter) == (False, "none")
 
 
+def test_vietnamese_normalization_and_syllable_containment() -> None:
+    assert step07.norm_vi("- HỐ,   sâu!") == "hố sâu"
+    assert step07.contains("hố", "cái hố", max_extra_syllables=4)
+    assert not step07.contains("ao", "một cái ao ở cuối con đường xa", max_extra_syllables=4)
+    assert not step07.contains("hố sâu", "sâu cái hố", max_extra_syllables=4)
+
+
+def test_second_hop_cleaning_articles_and_verb_marker() -> None:
+    assert step07.clean_second_hop("The house!", pos="noun") == "house"
+    assert step07.clean_second_hop("to run.", pos="verb") == "run"
+    assert step07.clean_second_hop("a tree...", pos="noun") == "tree"
+
+
 def test_part_b_selection_uses_earliest_beam_then_provisional_order() -> None:
     converter = OpenCC("t2s")
     assert step07.select_part_b("chat", ["félin"], ["félin", "chat", "x", "y", "z"], language="fr", pos="noun", opencc=converter) == ("félin", True, True, ["chat"])
@@ -63,11 +76,15 @@ class MockTranslator:
 
 def test_process_rows_with_mocked_model_covers_parts_a_and_b() -> None:
     row = FIXTURE["row"]
-    config = {"lang_codes": {"vi": "vie_Latn", "en": "eng_Latn", "zh": "zho_Hans", "fr": "fra_Latn", "id": "ind_Latn"}}
+    config = {"lang_codes": {"vi": "vie_Latn", "en": "eng_Latn", "zh": "zho_Hans", "fr": "fra_Latn", "id": "ind_Latn"}, "bt": {"max_extra_syllables": 4}}
     translator = MockTranslator()
     rows, _, info = step07.process_rows([row], translator=translator, config=config, logger=None)
     result = rows[0]
     assert result["bt_pass"] is True
+    assert result["bt_pass_strict_v1"] is True
+    assert result["rt_contain"] is True
+    assert result["fwd_hit"] is True
+    assert result["bt_route"] == "strict"
     assert result["bt_match"] == "alt"
     assert result["bt_pass_top1"] is False
     assert result["en_hit"] is True
