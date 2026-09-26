@@ -247,6 +247,7 @@ covariates:
 
 diacritics:
   wordfreq_top_n: 50000 # wordfreq returns its complete Vietnamese vocabulary (10,622 entries)
+  expected_wordfreq_n: 10622
   max_collapse_partners: 3
   report_examples_n: 20
   paths:

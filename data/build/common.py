@@ -102,6 +102,54 @@ def strip_diacritics(value: str) -> str:
     return stripped.replace("đ", "d").replace("Đ", "D").lower()
 
 
+def contextual_tokenization(tokenizer: Any, prefix: str, word: str) -> tuple[int, list[str]]:
+    """Return the no-special-token contextual token-count difference and suffix tokens."""
+    prefix = normalize_nfc(prefix)
+    word = normalize_nfc(word)
+    if not prefix.strip():
+        raise ValueError("Token context prefix must be non-empty")
+    if not word.strip():
+        raise ValueError("Cannot tokenize an empty canonical form")
+    prefix_ids = tokenizer.encode(prefix, add_special_tokens=False)
+    context_ids = tokenizer.encode(f"{prefix} {word}", add_special_tokens=False)
+    if len(context_ids) < len(prefix_ids):
+        raise ValueError(
+            "Context encoding is shorter than prefix encoding for "
+            f"prefix={prefix!r}, word={word!r}: {len(context_ids)} < {len(prefix_ids)}"
+        )
+    token_strings = tokenizer.convert_ids_to_tokens(context_ids)
+    if isinstance(token_strings, str):
+        token_strings = [token_strings]
+    if not isinstance(token_strings, list) or len(token_strings) != len(context_ids):
+        raise ValueError(
+            "Tokenizer returned an unexpected token-string sequence for "
+            f"prefix={prefix!r}, word={word!r}"
+        )
+    if any(not isinstance(token, str) for token in token_strings):
+        raise ValueError(f"Tokenizer returned a non-string token for {word!r}: {token_strings!r}")
+    count = len(context_ids) - len(prefix_ids)
+    incremental_tokens = [normalize_nfc(token) for token in token_strings[len(prefix_ids):]]
+    if len(incremental_tokens) != count:
+        raise ValueError(f"Tokenizer count/token-string mismatch for {word!r}")
+    return count, incremental_tokens
+
+
+def require_resolved_concreteness(rows: Iterable[Mapping[str, Any]]) -> None:
+    """Refuse final release assembly while any row has pending concreteness."""
+    pending: list[str] = []
+    for row in rows:
+        if row.get("concreteness_match") == "pending":
+            identifier = row.get("concept_id", "<unknown concept>")
+            pending.append(str(identifier))
+    if pending:
+        preview = ", ".join(pending[:10])
+        suffix = "" if len(pending) <= 10 else f" (and {len(pending) - 10} more)"
+        raise ValueError(
+            "Refusing final dataset assembly: concreteness_match is pending for "
+            f"{len(pending)} concepts: {preview}{suffix}"
+        )
+
+
 def normalized_levenshtein(left: str, right: str) -> float:
     """Return Levenshtein distance divided by the longer string length."""
 

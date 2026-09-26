@@ -17,9 +17,9 @@ import pyarrow.parquet as pq
 from transformers import AutoTokenizer
 
 try:
-    from common import load_config, normalize_nfc, normalize_strings, setup_logging
+    from common import contextual_tokenization, load_config, normalize_nfc, normalize_strings, setup_logging
 except ModuleNotFoundError:
-    from data.build.common import load_config, normalize_nfc, normalize_strings, setup_logging
+    from data.build.common import contextual_tokenization, load_config, normalize_nfc, normalize_strings, setup_logging
 
 
 STEP = "10_tokens"
@@ -34,38 +34,6 @@ LANGUAGE_COLUMNS = {
 EXPECTED_SPLITS = {"fewshot_reservoir", "directions", "test"}
 EXPECTED_STRATA = {"sino", "nonsino", "ambiguous", "other_loan"}
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
-
-
-def contextual_tokenization(tokenizer: Any, prefix: str, word: str) -> tuple[int, list[str]]:
-    """Return the contextual token-count difference and its token-string suffix."""
-    prefix = normalize_nfc(prefix)
-    word = normalize_nfc(word)
-    if not prefix.strip():
-        raise ValueError("Token context prefix must be non-empty")
-    if not word.strip():
-        raise ValueError("Cannot tokenize an empty canonical form")
-    prefix_ids = tokenizer.encode(prefix, add_special_tokens=False)
-    context_ids = tokenizer.encode(f"{prefix} {word}", add_special_tokens=False)
-    if len(context_ids) < len(prefix_ids):
-        raise ValueError(
-            "Context encoding is shorter than prefix encoding for "
-            f"prefix={prefix!r}, word={word!r}: {len(context_ids)} < {len(prefix_ids)}"
-        )
-    token_strings = tokenizer.convert_ids_to_tokens(context_ids)
-    if isinstance(token_strings, str):
-        token_strings = [token_strings]
-    if not isinstance(token_strings, list) or len(token_strings) != len(context_ids):
-        raise ValueError(
-            "Tokenizer returned an unexpected token-string sequence for "
-            f"prefix={prefix!r}, word={word!r}"
-        )
-    if any(not isinstance(token, str) for token in token_strings):
-        raise ValueError(f"Tokenizer returned a non-string token for {word!r}: {token_strings!r}")
-    count = len(context_ids) - len(prefix_ids)
-    incremental_tokens = [normalize_nfc(token) for token in token_strings[len(prefix_ids):]]
-    if len(incremental_tokens) != count:
-        raise ValueError(f"Tokenizer count/token-string mismatch for {word!r}")
-    return count, incremental_tokens
 
 
 def syllable_bucket(word: str, edges: list[int]) -> str:

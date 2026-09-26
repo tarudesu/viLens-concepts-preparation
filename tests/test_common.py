@@ -18,6 +18,7 @@ from data.build.common import (
     normalize_nfc,
     normalize_strings,
     normalized_levenshtein,
+    require_resolved_concreteness,
     setup_logging,
     strip_diacritics,
     stream_jsonl,
@@ -31,6 +32,12 @@ def test_normalize_nfc() -> None:
 
 def test_strip_diacritics_including_vietnamese_d() -> None:
     assert strip_diacritics("Đường phố") == "duong pho"
+
+
+def test_release_guard_rejects_pending_concreteness() -> None:
+    with pytest.raises(ValueError, match="Refusing final dataset assembly"):
+        require_resolved_concreteness([{"concept_id": "abc", "concreteness_match": "pending"}])
+    require_resolved_concreteness([{"concept_id": "abc", "concreteness_match": "exact"}])
 
 
 @pytest.mark.parametrize(
