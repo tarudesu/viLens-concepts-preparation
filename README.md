@@ -14,9 +14,21 @@ environment. Make targets also invoke scripts through `uv run --active --no-sync
 
 `make step-00` runs `data/build/00_scaffold.py --config configs/data.yaml`.
 Make automatically exposes `step-NN` for each `NN_<name>.py` script added to
-the configured build directory; `all` runs available steps in number order.
-Only task 00 is implemented so far. Override `CONFIG` or `PYTHON` when needed.
-All configured relative paths are relative to the repository working directory.
+the configured build directory; `all` runs available steps in the configured
+dependency order. Override `CONFIG` or `PYTHON` when needed. All configured
+relative paths are relative to the repository working directory.
+
+For an offline rebuild after sources have been registered, run:
+
+```sh
+make -o step-01 all
+```
+
+Step 01 performs live source checks and requires network access (and the
+appropriate access tokens). The `-o step-01` option tells Make to treat that
+target as already up to date and skip it. All later steps rebuild offline from
+`data/raw/` and the cached Wikidata and NLLB responses; required raw inputs and
+caches must already be present.
 
 Raw downloads live in `data/raw/`; intermediate Parquet files and logs live in
 `data/interim/`; prompts live in `data/prompts/`; final outputs live in `data/`.
