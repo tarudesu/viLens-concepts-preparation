@@ -23,6 +23,12 @@ endif
 
 all: $(STEP_TARGETS)
 
+# Concrete dependency edges: 09b consumes the completed main/extension step-11
+# tables; prompts consume the resolved values; release follows both prompt paths.
+step-09b: step-11b
+step-12: step-09b
+step-14: step-12 step-13b
+
 $(STEP_TARGETS): step-%:
 	PYTORCH_ENABLE_MPS_FALLBACK=1 $(PYTHON) -B $(filter $(BUILD_DIR)/$*_%.py,$(STEP_SCRIPTS)) --config "$(CONFIG)"
 
