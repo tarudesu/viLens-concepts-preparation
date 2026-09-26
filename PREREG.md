@@ -216,3 +216,18 @@ v1.2 (2026-09-26; pre-data; no model outputs exist at the time of this amendment
 - `data/concepts.tsv` SHA-256: `6ed1faf4210e43f7e37058bf975573d43ed76613897b8e6b5d609524546d4de8`
 - Pipeline commit: `0629a4519e7cadfd61d370156ca2b76fd926cb8d`
 - Data-build-complete amendment commit: `36d88c0ebdeb06161b4ebf1e99326a663b43cde9`
+- concepts.tsv was generated at pipeline commit b6ecb6f (the header line) and reproduced byte-for-byte at 0629a45 after the Makefile order fix.
+
+## Protocol amendments (continued)
+
+### v1.2 corrections (2026-09-27, before any study-LLM run)
+
+- Correction to the Checkpoint D line: the 337 cloze count included the M1
+  extension. On the main test set, cloze coverage is 265/1,535; cloze is
+  SUPPLEMENTARY (see step 12b).
+- §4.3 filter 4 (recorded late; applied since step 06): surface distance is
+  normalized Levenshtein after removing diacritics, spaces, hyphens and
+  apostrophes, with Vietnamese 'ph'→'f'. An etymology-based loanword filter
+  drops borrowings from European languages and Malay/Indonesian
+  (bor/bor+/lbor/der/der+/obor templates); calques and Sinitic, Sino-Japanese
+  and areal/proto-language derivations are retained.

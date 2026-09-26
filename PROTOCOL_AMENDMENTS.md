@@ -84,3 +84,15 @@ v1.2 (2026-09-26; pre-data; no model outputs exist at the time of this amendment
   | m1_extension | nonsino | 68 | 67 (98.53%) | 0 (0.00%) | 1 (1.47%) |
   | m1_extension | other_loan | 2 | 2 (100.00%) | 0 (0.00%) | 0 (0.00%) |
   | m1_extension | sino | 26 | 25 (96.15%) | 0 (0.00%) | 1 (3.85%) |
+
+### v1.2 corrections (2026-09-27, before any study-LLM run)
+
+- Correction to the Checkpoint D line: the 337 cloze count included the M1
+  extension. On the main test set, cloze coverage is 265/1,535; cloze is
+  SUPPLEMENTARY (see step 12b).
+- §4.3 filter 4 (recorded late; applied since step 06): surface distance is
+  normalized Levenshtein after removing diacritics, spaces, hyphens and
+  apostrophes, with Vietnamese 'ph'→'f'. An etymology-based loanword filter
+  drops borrowings from European languages and Malay/Indonesian
+  (bor/bor+/lbor/der/der+/obor templates); calques and Sinitic, Sino-Japanese
+  and areal/proto-language derivations are retained.
