@@ -235,7 +235,7 @@ tokens:
   e1_gate_share_threshold: 0.60
   m1_min_single_token_n: 150
   paths:
-    input: data/interim/08_etym.parquet
+    input: data/interim/09_cov.parquet
     output: data/interim/10_tok.parquet
     tokenizer_cache: data/raw/hf_tokenizers
 

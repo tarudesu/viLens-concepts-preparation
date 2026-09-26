@@ -84,22 +84,22 @@ def _validate_rows(rows: list[dict[str, Any]], languages: list[str]) -> None:
     """Fail with diagnostics if step-08 rows do not match the expected schema."""
     required = {"concept_id", "split", "stratum", *LANGUAGE_COLUMNS.values()}
     if not rows:
-        raise ValueError("Step-08 input contains no concepts")
+        raise ValueError("Tokenization input contains no concepts")
     ids: set[str] = set()
     for index, row in enumerate(rows, start=1):
         missing = sorted(required - row.keys())
         if missing:
-            raise ValueError(f"Step-08 row {index} is missing required fields: {missing!r}")
+            raise ValueError(f"Tokenization input row {index} is missing required fields: {missing!r}")
         concept_id = row["concept_id"]
         if not isinstance(concept_id, str) or not concept_id:
-            raise ValueError(f"Step-08 row {index} has malformed concept_id: {concept_id!r}")
+            raise ValueError(f"Tokenization input row {index} has malformed concept_id: {concept_id!r}")
         if concept_id in ids:
             raise ValueError(f"Duplicate concept_id in step-08 input: {concept_id!r}")
         ids.add(concept_id)
         if not isinstance(row["split"], str) or row["split"] not in EXPECTED_SPLITS:
-            raise ValueError(f"Unexpected split in step-08 row {concept_id}: {row['split']!r}")
+            raise ValueError(f"Unexpected split in tokenization row {concept_id}: {row['split']!r}")
         if not isinstance(row["stratum"], str) or row["stratum"] not in EXPECTED_STRATA:
-            raise ValueError(f"Unexpected etymology stratum in step-08 row {concept_id}: {row['stratum']!r}")
+            raise ValueError(f"Unexpected etymology stratum in tokenization row {concept_id}: {row['stratum']!r}")
         for language in languages:
             field = LANGUAGE_COLUMNS[language]
             value = row[field]
@@ -137,7 +137,7 @@ def _schema_with_tokens(input_schema: pa.Schema, model_keys: tuple[str, ...], la
         additions.append(pa.field(f"single_token_vi_{model_key}", pa.bool_(), nullable=False))
     collisions = sorted({field.name for field in additions}.intersection(input_schema.names))
     if collisions:
-        raise ValueError(f"Step-08 input unexpectedly already contains step-10 columns: {collisions!r}")
+        raise ValueError(f"Tokenization input unexpectedly already contains step-10 columns: {collisions!r}")
     return pa.schema([*input_schema, *additions])
 
 
@@ -222,7 +222,7 @@ def _report(
 
 
 def run(config_path: str | Path) -> dict[str, Any]:
-    """Run contextual token counts on the complete step-08 concept table."""
+    """Run contextual token counts on the complete step-09 concept table."""
     started = time.monotonic()
     config = load_config(config_path)
     logger = setup_logging(STEP, config["paths"]["logs"], level=config.get("logging", {}).get("level", "INFO"))
@@ -247,7 +247,7 @@ def run(config_path: str | Path) -> dict[str, Any]:
     output_path = Path(settings["paths"]["output"])
     cache_dir = Path(settings["paths"]["tokenizer_cache"])
     if not input_path.is_file():
-        raise FileNotFoundError(f"Step-08 input not found: {input_path}")
+        raise FileNotFoundError(f"Step-09 input not found: {input_path}")
     table = pq.read_table(input_path)
     input_schema = table.schema
     rows = [normalize_strings(row) for row in table.to_pylist()]
