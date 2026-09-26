@@ -89,6 +89,25 @@ def test_09b_xlsx_bigram_exact_head_fallback_and_duplicate_resolution(tmp_path: 
     assert "Duplicate normalized Brysbaert Word='cat'" in caplog.text
 
 
+def test_09b_xlsx_preserves_literal_na_like_words(tmp_path: Path) -> None:
+    import pandas as pd
+
+    step = load_script("09b_concreteness.py")
+    workbook = tmp_path / "literal_words.xlsx"
+    pd.DataFrame([
+        {"Word": "null", "Bigram": 0, "Conc.M": 1.0, "Total": 10},
+        {"Word": "nan", "Bigram": 0, "Conc.M": 2.0, "Total": 11},
+        {"Word": "NA", "Bigram": 0, "Conc.M": 3.0, "Total": 12},
+    ]).to_excel(workbook, index=False)
+    norms = step.load_norms(
+        workbook, word_column="Word", value_column="Conc.M", bigram_column="Bigram",
+        raters_column="Total",
+    )
+    assert norms[("null", 0)] == 1.0
+    assert norms[("nan", 0)] == 2.0
+    assert norms[("na", 0)] == 3.0
+
+
 def test_09b_missing_inputs_diagnostic(tmp_path: Path) -> None:
     step = load_script("09b_concreteness.py")
     missing = [tmp_path / "11_diac.parquet", tmp_path / "11_m1_ext.parquet"]

@@ -86,7 +86,9 @@ def load_norms(
     if norms_path.suffix.casefold() in {".xlsx", ".xlsm"}:
         import pandas as pd
 
-        frame = pd.read_excel(norms_path, engine="openpyxl")
+        frame = pd.read_excel(
+            norms_path, engine="openpyxl", keep_default_na=False, na_values={},
+        )
         required_columns = {word_column, value_column}
         if bigram_column:
             required_columns.add(bigram_column)
