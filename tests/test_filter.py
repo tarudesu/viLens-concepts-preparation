@@ -68,11 +68,23 @@ def test_canonical_vi_rank_and_homograph_sense_sum() -> None:
     assert step06.summed_vi_senses(FIXTURE["vi_homographs"]) == 4
 
 
-def test_loan_source_language_chinese_exception() -> None:
-    templates = {"bor", "bor+", "lbor", "der", "der+", "cal", "calque", "obor"}
-    chinese = {"zh", "cmn", "ltc", "och", "yue"}
-    assert step06.loan_source_languages({"etymology_templates": [[FIXTURE["loan_french"]]]}, templates, chinese) == ["fr"]
-    assert step06.loan_source_languages({"etymology_templates": [[FIXTURE["loan_chinese"]]]}, templates, chinese) == []
+def test_loanword_source_allowlist_and_template_selection() -> None:
+    templates = {"bor", "bor+", "lbor", "der", "der+", "obor"}
+    drop_codes = {"fr", "en", "la", "la-new", "la-lat", "la-med", "grc", "pt", "es", "it", "de", "nl", "ru", "ms", "id"}
+    prefixes = ["en-", "fr-", "es-", "pt-"]
+    for name in ("loan_ja", "loan_lzh_lit", "loan_cmc_pro", "loan_chinese"):
+        records = step06.loan_templates_found({"etymology_templates": [[FIXTURE[name]]]}, templates)
+        assert records
+        assert not any(step06.source_matches_drop_list(str(row["source_lang"]), drop_codes, prefixes) for row in records)
+    for name in ("loan_french", "loan_ms", "loan_en_us"):
+        records = step06.loan_templates_found({"etymology_templates": [[FIXTURE[name]]]}, templates)
+        assert records
+        assert any(step06.source_matches_drop_list(str(row["source_lang"]), drop_codes, prefixes) for row in records)
+    assert step06.loan_templates_found({"etymology_templates": [[FIXTURE["loan_french"]]]}, templates) == [
+        {"template": "bor", "source_lang": "fr", "args3": "gare"},
+    ]
+    # cal/calque are deliberately absent from the new template allowlist.
+    assert step06.loan_templates_found({"etymology_templates": [[FIXTURE["loan_cal_pt"]]]}, templates) == []
 
 
 def test_dedup_keeps_attestation_ranked_concept() -> None:

@@ -139,9 +139,9 @@ def canonical_language(words: list[str], *, language: str, pos: str, config: dic
     return ranked[0], ranked[1:], derived, zh_removed
 
 
-def loan_source_languages(candidate: dict[str, Any], template_names: set[str], chinese_codes: set[str]) -> list[str]:
-    """Return distinct non-Chinese source languages in configured VI loan templates."""
-    output: set[str] = set()
+def loan_templates_found(candidate: dict[str, Any], template_names: set[str]) -> list[dict[str, str | None]]:
+    """Capture configured loan-template name, source language, and source term."""
+    found: list[dict[str, str | None]] = []
     groups = candidate.get("etymology_templates")
     if not isinstance(groups, list):
         raise ValueError(f"Malformed etymology_templates: {groups!r}")
@@ -165,9 +165,32 @@ def loan_source_languages(candidate: dict[str, Any], template_names: set[str], c
             if args.get("1") != "vi":
                 raise ValueError(f"Expected Vietnamese target language in loan template argument 1: {template!r}")
             source = normalize_nfc(args["2"].strip()).lower()
-            if source not in chinese_codes and not source.startswith("zh-"):
-                output.add(source)
-    return sorted(output)
+            source_term = args.get("3")
+            if source_term is not None and not isinstance(source_term, str):
+                raise ValueError(f"Loan template argument 3 must be a string or missing: {template!r}")
+            found.append({
+                "template": normalize_nfc(template["name"]),
+                "source_lang": source,
+                "args3": normalize_nfc(source_term) if source_term is not None else None,
+            })
+    return sorted(found, key=lambda item: (item["template"] or "", item["source_lang"] or "", item["args3"] or ""))
+
+
+def source_matches_drop_list(source: str, exact: set[str], prefixes: list[str]) -> bool:
+    """Match a normalized source code against exact codes and configured prefixes."""
+    normalized = normalize_nfc(source).strip().lower()
+    return normalized in exact or any(normalized.startswith(prefix.lower()) for prefix in prefixes)
+
+
+def old_rule_dropped(records: list[dict[str, str | None]], *, template_names: set[str], chinese_codes: set[str], chinese_prefix: str) -> list[str]:
+    """Return source codes the previous non-Chinese rule would have dropped."""
+    return sorted({
+        str(record["source_lang"])
+        for record in records
+        if record["template"] in template_names
+        and record["source_lang"] not in chinese_codes
+        and not str(record["source_lang"]).startswith(chinese_prefix)
+    })
 
 
 def surface_comparisons(vi: str, words_by_lang: dict[str, list[str]], *, norm_config: dict[str, Any]) -> tuple[float, str, str, float]:
@@ -240,10 +263,24 @@ def _output_schema(schema: pa.Schema) -> pa.Schema:
         pa.field("id_canonical_provisional", pa.bool_()),
         pa.field("min_surface_dist", pa.float64()), pa.field("closest_lang", pa.string()),
         pa.field("closest_form", pa.string()), pa.field("raw_surface_dist", pa.float64()),
-        pa.field("loan_source_lang", pa.list_(pa.string())),
+        pa.field("loan_templates_found", pa.list_(pa.struct([
+            pa.field("template", pa.string()), pa.field("source_lang", pa.string()), pa.field("args3", pa.string()),
+        ]))),
     ]
     existing = set(schema.names)
     return pa.schema([*schema, *(field for field in additions if field.name not in existing)])
+
+
+def _loan_audit_schema() -> pa.Schema:
+    return pa.schema([
+        pa.field("concept_id", pa.string()), pa.field("split", pa.string()),
+        pa.field("en_lemma", pa.string()), pa.field("pos", pa.string()),
+        pa.field("vi_canonical", pa.string()),
+        pa.field("loan_templates_found", pa.list_(pa.struct([
+            pa.field("template", pa.string()), pa.field("source_lang", pa.string()), pa.field("args3", pa.string()),
+        ]))),
+        pa.field("reached_filter4b", pa.bool_()), pa.field("loanword_dropped", pa.bool_()),
+    ])
 
 
 def _write_parquet(rows: list[dict[str, Any]], schema: pa.Schema, path: Path, row_group_size: int) -> None:
@@ -324,10 +361,16 @@ def run(config_path: str) -> dict[str, Any]:
         norm_config = filters["surface_norm"]
         if not isinstance(norm_config.get("remove_chars"), list) or not isinstance(norm_config.get("vi_replace"), dict):
             raise ValueError("filters.surface_norm requires remove_chars list and vi_replace mapping")
-        loan_templates = set(filters["loanword_templates"])
-        chinese_codes = {code.lower() for code in filters["loanword_chinese_codes"]}
-        if not loan_templates or not chinese_codes:
-            raise ValueError("Loanword template and Chinese-code config lists must be non-empty")
+        loan_settings = filters["loanword"]
+        loan_templates = set(loan_settings["loan_templates"])
+        drop_source_langs = {code.lower() for code in loan_settings["drop_source_langs"]}
+        drop_source_prefixes = [prefix.lower() for prefix in loan_settings["drop_source_lang_prefixes"]]
+        previous_rule = loan_settings["previous_rule_for_comparison"]
+        previous_templates = set(previous_rule["loan_templates"])
+        previous_chinese = {code.lower() for code in previous_rule["chinese_codes"]}
+        previous_chinese_prefix = previous_rule["chinese_prefix"].lower()
+        if not loan_templates or not drop_source_langs or not drop_source_prefixes:
+            raise ValueError("Loanword templates, drop source codes, and prefixes must be non-empty")
 
         input_path = Path(settings["paths"]["input"])
         table = pq.read_table(input_path)
@@ -347,6 +390,7 @@ def run(config_path: str) -> dict[str, Any]:
         zipf_cache: dict[str, float] = {}
         prepared: dict[str, list[dict[str, Any]]] = {split: [] for split in SPLITS}
         zh_latin_removed: Counter[str] = Counter()
+        loan_info_by_id: dict[str, tuple[str, list[dict[str, str | None]], list[dict[str, str | None]]]] = {}
         for index, original in enumerate(sorted(rows, key=lambda row: row["concept_id"]), start=1):
             row = dict(original)
             split = row["split"]
@@ -358,6 +402,16 @@ def run(config_path: str) -> dict[str, Any]:
                     "n_vi_entries": selected["n_vi_entries"], "n_sources": selected["n_sources"],
                     "external_attested": selected["external_attested"],
                 })
+                same_form = [candidate for candidate in row["vi_cands"] if candidate["word"].casefold() == vi_word.casefold()]
+                row["loan_templates_found"] = sorted(
+                    (record for candidate in same_form for record in loan_templates_found(candidate, loan_templates)),
+                    key=lambda item: (item["template"] or "", item["source_lang"] or "", item["args3"] or ""),
+                )
+                previous_records = sorted(
+                    (record for candidate in same_form for record in loan_templates_found(candidate, previous_templates)),
+                    key=lambda item: (item["template"] or "", item["source_lang"] or "", item["args3"] or ""),
+                )
+                loan_info_by_id[row["concept_id"]] = (vi_word, row["loan_templates_found"], previous_records)
                 missing = []
                 for language in LANGUAGES:
                     words = candidate_words(row[f"{language}_cands"])
@@ -428,21 +482,43 @@ def run(config_path: str) -> dict[str, Any]:
             stages["filter4_surface"][split] = kept
 
         loan_counts: Counter[str] = Counter()
+        recovered_at_loan_stage: Counter[str] = Counter()
         loan_examples: list[dict[str, Any]] = []
+        loanword_dropped_ids: set[str] = set()
+        e2_eligible_ids = {row["concept_id"] for split in SPLITS for row in stages["filter4_surface"][split]}
         for split in SPLITS:
             kept = []
             for row in stages["filter4_surface"][split]:
-                # Canonical VI deduplicates by spelling; scan every same-spelling homograph candidate as required.
-                same_form = [candidate for candidate in row["vi_cands"] if candidate["word"].casefold() == row["vi_canonical"].casefold()]
-                sources = sorted({source for candidate in same_form for source in loan_source_languages(candidate, loan_templates, chinese_codes)})
-                row["loan_source_lang"] = sources
+                records = row["loan_templates_found"]
+                sources = sorted({str(record["source_lang"]) for record in records if source_matches_drop_list(str(record["source_lang"]), drop_source_langs, drop_source_prefixes)})
+                old_sources = old_rule_dropped(
+                    loan_info_by_id[row["concept_id"]][2], template_names=previous_templates,
+                    chinese_codes=previous_chinese, chinese_prefix=previous_chinese_prefix,
+                )
+                for source in sources:
+                    loan_counts[source] += 1
+                if old_sources and not sources:
+                    for source in old_sources:
+                        recovered_at_loan_stage[source] += 1
+                row["loanword_dropped"] = bool(sources)
                 if sources:
-                    for source in sources:
-                        loan_counts[source] += 1
+                    loanword_dropped_ids.add(row["concept_id"])
                     loan_examples.append(row)
                 else:
                     kept.append(row)
             stages["filter4b_loanword"][split] = kept
+
+        loan_audit_rows = []
+        for row in sorted(rows, key=lambda item: item["concept_id"]):
+            info = loan_info_by_id.get(row["concept_id"])
+            vi_word, records = (info[0], info[1]) if info else (None, [])
+            loan_audit_rows.append({
+                "concept_id": row["concept_id"], "split": row["split"],
+                "en_lemma": row["en_lemma"], "pos": row["pos"],
+                "vi_canonical": vi_word, "loan_templates_found": records,
+                "reached_filter4b": row["concept_id"] in e2_eligible_ids,
+                "loanword_dropped": row["concept_id"] in loanword_dropped_ids,
+            })
 
         dedup_actions: list[tuple[str, str, str, str]] = []
         final_by_split: dict[str, list[dict[str, Any]]] = {}
@@ -479,7 +555,23 @@ def run(config_path: str) -> dict[str, Any]:
         output_rows = sorted((row for split in SPLITS for row in final_by_split[split]), key=lambda row: row["concept_id"])
         output_schema = _output_schema(table.schema)
         output_path = Path(settings["paths"]["output"])
+        audit_path = Path(settings["paths"]["loanword_audit"])
+        previous_output_ids: set[str] | None = None
+        if output_path.exists():
+            previous_output_ids = set(pq.read_table(output_path, columns=["concept_id"]).column("concept_id").to_pylist())
+        _write_parquet(loan_audit_rows, _loan_audit_schema(), audit_path, row_group_size)
         _write_parquet(output_rows, output_schema, output_path, row_group_size)
+        recovered_final = [] if previous_output_ids is None else [row for row in output_rows if row["concept_id"] not in previous_output_ids]
+        recovered_final_by_source: Counter[str] = Counter()
+        for row in recovered_final:
+            previous_sources = old_rule_dropped(
+                loan_info_by_id[row["concept_id"]][2], template_names=previous_templates,
+                chinese_codes=previous_chinese, chinese_prefix=previous_chinese_prefix,
+            )
+            if previous_sources:
+                recovered_final_by_source.update(previous_sources)
+            else:
+                recovered_final_by_source["not-attributed-to-previous-e2"] += 1
 
         dropflow_path = Path(config["paths"]["dropflow"])
         _dropflow_without_step(dropflow_path, "06")
@@ -493,10 +585,14 @@ def run(config_path: str) -> dict[str, Any]:
             for stage in STAGES:
                 n_in, _, n_out, out_pos = flow_counts[split][stage]
                 logger.info("%s | %s | n_in=%d | n_out=%d | n_out_by_pos=%s", split, stage, n_in, n_out, json.dumps(dict(sorted(out_pos.items())), sort_keys=True))
-        logger.info("filter4b_loanword dropped concepts by loan_source_lang: %s", json.dumps(dict(sorted(loan_counts.items())), ensure_ascii=False, sort_keys=True))
+        logger.info("filter4b_loanword dropped concepts by source language: %s", json.dumps(dict(sorted(loan_counts.items())), ensure_ascii=False, sort_keys=True))
+        logger.info("Recovered at filter4b vs previous rule by source language: %s", json.dumps(dict(sorted(recovered_at_loan_stage.items())), ensure_ascii=False, sort_keys=True))
+        logger.info("Additional final-output concepts vs previous parquet: %d; by previous-rule source language: %s", len(recovered_final), json.dumps(dict(sorted(recovered_final_by_source.items())), ensure_ascii=False, sort_keys=True))
+        logger.info("Loanword audit: %s (%d input concepts)", audit_path, len(loan_audit_rows))
         logger.info("Concepts dropped by e2 that surface filter alone would keep (up to 15): vi | source | distance")
         for row in sorted(loan_examples, key=lambda item: item["concept_id"])[:int(report["loanword_examples_n"])]:
-            logger.info("%s | %s | %.6f", row["vi_canonical"], ",".join(row["loan_source_lang"]), row["min_surface_dist"])
+            sources = sorted({str(item["source_lang"]) for item in row["loan_templates_found"] if source_matches_drop_list(str(item["source_lang"]), drop_source_langs, drop_source_prefixes)})
+            logger.info("%s | %s | %.6f", row["vi_canonical"], ",".join(sources), row["min_surface_dist"])
 
         # Surface diagnostic on TEST rows after proper-noun/polysemy stages and before surface filtering.
         test_surface = [row for row in stages["filter3_polysemy"]["test"]]
@@ -511,9 +607,9 @@ def run(config_path: str) -> dict[str, Any]:
         above = sorted((row for row in test_surface if row["min_surface_dist"] > threshold), key=lambda row: (row["min_surface_dist"] - threshold, row["concept_id"]))[:near_n]
         below = sorted((row for row in test_surface if row["min_surface_dist"] < threshold), key=lambda row: (threshold - row["min_surface_dist"], row["concept_id"]))[:near_n]
         for label, selected in (("ABOVE", above), ("BELOW", below)):
-            logger.info("%d TEST concepts %s threshold %.2f (vi | closest lang:form | distance):", len(selected), label, threshold)
+            logger.info("%d TEST concepts %s threshold %.2f (vi | closest lang:form | min_distance | raw_distance):", len(selected), label, threshold)
             for row in selected:
-                logger.info("%s | %s:%s | %.6f", row["vi_canonical"], row["closest_lang"], row["closest_form"], row["min_surface_dist"])
+                logger.info("%s | %s:%s | %.6f | %.6f", row["vi_canonical"], row["closest_lang"], row["closest_form"], row["min_surface_dist"], row["raw_surface_dist"])
 
         logger.info("Dedup removals by split:")
         for split in SPLITS:

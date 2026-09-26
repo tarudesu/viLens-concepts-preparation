@@ -76,8 +76,14 @@ filters:
   surface_norm:
     remove_chars: [" ", "-", "'"]
     vi_replace: {ph: f}
-  loanword_templates: [bor, "bor+", lbor, der, "der+", cal, calque, obor]
-  loanword_chinese_codes: [zh, cmn, ltc, och, yue]
+  loanword:
+    drop_source_langs: [fr, en, la, la-new, la-lat, la-med, grc, pt, es, it, de, nl, ru, ms, id]
+    drop_source_lang_prefixes: ["en-", "fr-", "es-", "pt-"]
+    loan_templates: [bor, "bor+", lbor, der, "der+", obor]
+    previous_rule_for_comparison:
+      loan_templates: [bor, "bor+", lbor, der, "der+", cal, calque, obor]
+      chinese_codes: [zh, cmn, ltc, och, yue]
+      chinese_prefix: "zh-"
   surface_compare_langs:
     - en
     - fr
@@ -92,6 +98,7 @@ filter:
   paths:
     input: data/interim/05_split.parquet
     output: data/interim/06_filtered.parquet
+    loanword_audit: data/interim/06_loanword_audit.parquet
 
 nllb:
   model: facebook/nllb-200-distilled-600M
