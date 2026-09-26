@@ -48,6 +48,43 @@ def normalize_nfc(value: str) -> str:
     return unicodedata.normalize("NFC", value)
 
 
+def strip_diacritics(value: str) -> str:
+    """Remove combining marks and Vietnamese đ/Đ from a string."""
+
+    if not isinstance(value, str):
+        raise TypeError(f"strip_diacritics expects str, got {type(value).__name__}")
+    decomposed = unicodedata.normalize("NFD", normalize_nfc(value))
+    stripped = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return stripped.replace("đ", "d").replace("Đ", "D").lower()
+
+
+def normalized_levenshtein(left: str, right: str) -> float:
+    """Return Levenshtein distance divided by the longer string length."""
+
+    if not isinstance(left, str) or not isinstance(right, str):
+        raise TypeError("normalized_levenshtein expects two strings")
+    left, right = normalize_nfc(left), normalize_nfc(right)
+    if left == right:
+        return 0.0
+    denominator = max(len(left), len(right))
+    if denominator == 0:
+        return 0.0
+    # Two-row dynamic program keeps memory linear in the shorter input.
+    if len(left) < len(right):
+        left, right = right, left
+    previous = list(range(len(right) + 1))
+    for i, char_left in enumerate(left, start=1):
+        current = [i]
+        for j, char_right in enumerate(right, start=1):
+            current.append(min(
+                current[-1] + 1,
+                previous[j] + 1,
+                previous[j - 1] + (char_left != char_right),
+            ))
+        previous = current
+    return previous[-1] / denominator
+
+
 def normalize_strings(value: Any) -> Any:
     """Recursively normalize every string in a JSON/YAML-compatible value."""
 

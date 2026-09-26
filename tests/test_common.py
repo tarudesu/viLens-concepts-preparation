@@ -17,13 +17,24 @@ from data.build.common import (
     log_dropflow,
     normalize_nfc,
     normalize_strings,
+    normalized_levenshtein,
     setup_logging,
+    strip_diacritics,
     stream_jsonl,
 )
 
 
 def test_normalize_nfc() -> None:
     assert normalize_nfc("e\u0301") == "é"
+
+
+def test_strip_diacritics_including_vietnamese_d() -> None:
+    assert strip_diacritics("Đường phố") == "duong pho"
+
+
+@pytest.mark.parametrize(("left", "right", "expected"), [("", "", 0.0), ("a", "", 1.0), ("same", "same", 0.0), ("cat", "cut", 1 / 3)])
+def test_normalized_levenshtein(left: str, right: str, expected: float) -> None:
+    assert normalized_levenshtein(left, right) == expected
 
 
 def test_normalize_nfc_rejects_non_string() -> None:

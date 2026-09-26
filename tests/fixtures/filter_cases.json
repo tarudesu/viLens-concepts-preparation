@@ -1,0 +1,9 @@
+{
+  "loan_french": {"name": "bor", "args_json": "{\"1\":\"vi\",\"2\":\"fr\",\"3\":\"gare\"}"},
+  "loan_chinese": {"name": "bor", "args_json": "{\"1\":\"vi\",\"2\":\"ltc\",\"3\":\"古\"}"},
+  "vi_homographs": {"word": "ánh", "n_vi_entries": 2, "n_senses_vi": [1, 3], "n_sources": 3, "external_attested": true},
+  "dedup_rows": [
+    {"concept_id": "a", "en_lemma": "cat", "vi_canonical": "mèo", "n_sources": 2, "external_attested": false, "n_senses_vi": 1},
+    {"concept_id": "b", "en_lemma": "feline", "vi_canonical": "mèo", "n_sources": 3, "external_attested": true, "n_senses_vi": 2}
+  ]
+}

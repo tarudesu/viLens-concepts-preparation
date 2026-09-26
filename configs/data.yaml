@@ -69,10 +69,29 @@ filters:
   attestation_sources: [wiktextract_table, vi_gloss, muse, wikidata]
   polysemy_percentile: 50
   surface_edit_threshold: 0.30
+  zh_forbid_latin: true
+  zh_adj_strip_de: true
+  polysemy_count: sum_over_homograph_entries
+  surface_compare: all_candidates
+  surface_norm:
+    remove_chars: [" ", "-", "'"]
+    vi_replace: {ph: f}
+  loanword_templates: [bor, "bor+", lbor, der, "der+", cal, calque, obor]
+  loanword_chinese_codes: [zh, cmn, ltc, och, yue]
   surface_compare_langs:
     - en
     - fr
     - id
+  report:
+    surface_histogram_bin_width: 0.05
+    surface_near_threshold_n: 30
+    dedup_examples_n: 15
+    loanword_examples_n: 15
+
+filter:
+  paths:
+    input: data/interim/05_split.parquet
+    output: data/interim/06_filtered.parquet
 
 nllb:
   model: facebook/nllb-200-distilled-600M

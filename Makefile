@@ -14,7 +14,7 @@ ifneq ($(words $(STEP_NUMBERS)),$(words $(sort $(STEP_NUMBERS))))
 $(error Expected exactly one script per step in $(BUILD_DIR))
 endif
 
-.PHONY: all download pool attest split test $(STEP_TARGETS)
+.PHONY: all download pool attest split filter test $(STEP_TARGETS)
 # Steps consume previous steps' outputs, including when called with make -j.
 .NOTPARALLEL:
 
@@ -30,6 +30,8 @@ pool: step-03
 attest: step-04
 
 split: step-05
+
+filter: step-06
 
 test:
 	$(PYTHON) -B -m pytest
