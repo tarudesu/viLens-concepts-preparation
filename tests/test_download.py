@@ -7,6 +7,7 @@ import logging
 import sys
 
 import pytest
+import pyarrow as pa
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "data" / "build"))
 download = import_module("01_download")
@@ -92,3 +93,45 @@ def test_brysbaert_registers_an_unmodified_manual_workbook(tmp_path: Path) -> No
     assert record.sha256 == hashlib.sha256(payload).hexdigest()
     assert record.license == "as distributed with the article; check terms before redistributing values"
     assert workbook.read_bytes() == payload
+
+
+def _flores_fixture(ids: list[str], *, language: str = "en", texts: list[str] | None = None) -> pa.Table:
+    sentence_texts = texts or [f"sentence {item}" for item in ids]
+    return pa.table({
+        "id": ids,
+        "text": sentence_texts,
+        "iso_639_3": [language] * len(ids),
+        "iso_15924": ["Latn"] * len(ids),
+        "glottocode": ["fixture123"] * len(ids),
+        "variant": ["standard"] * len(ids),
+        "split": ["dev"] * len(ids),
+        "unretained_field": ["not saved"] * len(ids),
+    })
+
+
+def test_flores_schema_mapping_and_selected_columns() -> None:
+    source = _flores_fixture(["2", "1"], texts=["ca\u0301", "hello"])
+    mapped, variants = download.map_flores_source_table(source, split="dev", language="en")
+    assert mapped.column_names == ["id", "sentence", "iso_639_3", "iso_15924", "glottocode", "variant", "split"]
+    assert mapped.column("id").to_pylist() == ["1", "2"]
+    assert mapped.column("sentence").to_pylist() == ["hello", "cá"]
+    assert variants == {"standard": 2}
+
+
+def test_flores_rejects_duplicate_ids_and_empty_sentences() -> None:
+    duplicate = _flores_fixture(["1", "1"])
+    with pytest.raises(download.SourceError, match="exactly one row per id"):
+        download.map_flores_source_table(duplicate, split="dev", language="en")
+    empty = _flores_fixture(["1"], texts=["   "])
+    with pytest.raises(download.SourceError, match="empty sentences"):
+        download.map_flores_source_table(empty, split="dev", language="en")
+
+
+def test_flores_parallel_ids_must_match_within_split() -> None:
+    first, _ = download.map_flores_source_table(_flores_fixture(["1", "2"], language="en"), split="dev", language="en")
+    second, _ = download.map_flores_source_table(_flores_fixture(["1", "3"], language="vi"), split="dev", language="vi")
+    with pytest.raises(download.SourceError, match="sentence ID sets differ"):
+        download.validate_flores_alignment(
+            {("dev", "en"): first, ("dev", "vi"): second},
+            splits=["dev"], languages=["en", "vi"],
+        )

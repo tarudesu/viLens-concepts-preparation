@@ -256,6 +256,11 @@ concreteness:
   csv:
     word_column: Word
     value_column: Conc.M
+  xlsx:
+    word_column: Word
+    value_column: Conc.M
+    bigram_column: Bigram
+    raters_column: Total
   spacy_model: en_core_web_sm
 
 fertility:

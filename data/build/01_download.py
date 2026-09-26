@@ -34,6 +34,91 @@ SOURCE_NAMES = (
     "wiktextract_en", "wiktextract_vi", "muse", "unihan", "cedict",
     "brysbaert", "flores", "nllb", "lid", "wordnet", "gated",
 )
+FLORES_SOURCE_FIELDS = ("id", "text", "iso_639_3", "iso_15924", "glottocode", "variant", "split")
+FLORES_OUTPUT_FIELDS = ("id", "sentence", "iso_639_3", "iso_15924", "glottocode", "variant", "split")
+
+
+def validate_flores_output_table(table: pa.Table, *, split: str, language: str) -> tuple[pa.Table, dict[str, int]]:
+    """Validate one mapped FLORES partition and return it sorted by sentence ID."""
+    if tuple(table.column_names) != FLORES_OUTPUT_FIELDS:
+        raise SourceError(
+            f"Unexpected saved FLORES+ fields for {split}/{language}: "
+            f"expected {list(FLORES_OUTPUT_FIELDS)!r}, found {table.column_names!r}"
+        )
+    if table.num_rows == 0:
+        raise SourceError(f"FLORES+ partition {split}/{language} is empty")
+    ids = table.column("id").to_pylist()
+    if any(value is None for value in ids):
+        raise SourceError(f"FLORES+ partition {split}/{language} has null sentence IDs")
+    counts: dict[Any, int] = {}
+    for value in ids:
+        counts[value] = counts.get(value, 0) + 1
+    duplicates = sorted((value for value, count in counts.items() if count != 1), key=str)
+    if duplicates:
+        detail = [(value, counts[value]) for value in duplicates[:10]]
+        raise SourceError(
+            f"FLORES+ partition {split}/{language} must have exactly one row per id; "
+            f"duplicate IDs (up to 10): {detail!r}"
+        )
+    sentences = table.column("sentence").to_pylist()
+    empty_rows = [index for index, value in enumerate(sentences) if not isinstance(value, str) or not value.strip()]
+    if empty_rows:
+        raise SourceError(
+            f"FLORES+ partition {split}/{language} has {len(empty_rows)} empty sentences; "
+            f"row indices (up to 10): {empty_rows[:10]!r}"
+        )
+    split_values = set(table.column("split").to_pylist())
+    if split_values != {split}:
+        raise SourceError(
+            f"FLORES+ partition {split}/{language} has unexpected split values: "
+            f"{sorted(split_values, key=str)!r}"
+        )
+    variant_counts: dict[str, int] = {}
+    for value in table.column("variant").to_pylist():
+        label = value if isinstance(value, str) else "<null>"
+        variant_counts[label] = variant_counts.get(label, 0) + 1
+    return table.sort_by([("id", "ascending")]), dict(sorted(variant_counts.items()))
+
+
+def map_flores_source_table(table: pa.Table, *, split: str, language: str) -> tuple[pa.Table, dict[str, int]]:
+    """Map FLORES+'s text field to sentence and retain only approved columns."""
+    missing = [name for name in FLORES_SOURCE_FIELDS if name not in table.column_names]
+    if missing:
+        raise SourceError(
+            f"Unexpected FLORES+ fields for {split}/{language}: missing {missing!r}; "
+            f"found {table.column_names!r}"
+        )
+    if not (pa.types.is_string(table.schema.field("text").type) or pa.types.is_large_string(table.schema.field("text").type)):
+        raise SourceError(f"Unexpected FLORES+ text type for {split}/{language}: {table.schema.field('text').type}")
+    selected = table.select(list(FLORES_SOURCE_FIELDS))
+    for index, field in enumerate(selected.schema):
+        if pa.types.is_string(field.type) or pa.types.is_large_string(field.type):
+            normalized = pa.array(
+                (normalize_nfc(value) if value is not None else None for value in selected.column(field.name).to_pylist()),
+                type=field.type,
+            )
+            selected = selected.set_column(index, field, normalized)
+    selected = selected.rename_columns(list(FLORES_OUTPUT_FIELDS))
+    return validate_flores_output_table(selected, split=split, language=language)
+
+
+def validate_flores_alignment(
+    tables: dict[tuple[str, str], pa.Table], *, splits: Iterable[str], languages: Iterable[str],
+) -> None:
+    """Require identical sentence-ID sets across languages within each split."""
+    ordered_languages = list(languages)
+    for split in splits:
+        reference_language = ordered_languages[0]
+        reference_ids = set(tables[(split, reference_language)].column("id").to_pylist())
+        for language in ordered_languages[1:]:
+            ids = set(tables[(split, language)].column("id").to_pylist())
+            if ids != reference_ids:
+                missing = sorted(reference_ids - ids, key=str)[:10]
+                extra = sorted(ids - reference_ids, key=str)[:10]
+                raise SourceError(
+                    f"FLORES+ sentence ID sets differ for split {split}: {language} vs {reference_language}; "
+                    f"missing (up to 10)={missing!r}, extra (up to 10)={extra!r}"
+                )
 
 
 class SourceError(RuntimeError):
@@ -553,8 +638,10 @@ def run_flores(config, session, root, records, sources_path, logger, config_path
 
     token = hub_token()
     if token is None:
-        logger.warning("FLORES+ needs an HF_TOKEN. Accept the dataset terms on %s, then set HF_TOKEN; continuing with other sources.", config["downloads"]["flores"]["page"])
-        return
+        raise SourceError(
+            "FLORES+ requires HF_TOKEN. Accept the gated-dataset terms at "
+            f"{config['downloads']['flores']['page']} and retry with an authorized token."
+        )
     settings = config["downloads"]["flores"]
     try:
         revision = settings["revision"]
@@ -563,44 +650,79 @@ def run_flores(config, session, root, records, sources_path, logger, config_path
             pin_config_revision(config_path, ("downloads", "flores", "revision"), revision)
         elif not re.fullmatch(r"[0-9a-f]{40}", revision):
             raise DataConfigError(f"downloads.flores.revision must be a full commit hash or TODO; got {revision!r}")
+        version = (
+            f"{revision}; schema mapping text->sentence, id=sentence identifier; "
+            "saved fields id,sentence,iso_639_3,iso_15924,glottocode,variant,split"
+        )
+        tables: dict[tuple[str, str], pa.Table] = {}
+        pending: dict[tuple[str, str], Path] = {}
+        output_url = f"https://huggingface.co/datasets/{settings['repo']}/tree/{revision}"
         for language in settings["languages"]:
             for split in settings["splits"]:
                 output = root / "flores" / f"{split}_{language}.parquet"
                 relative = output.resolve().relative_to(root.parent.parent.resolve()).as_posix()
                 old = records.get(relative)
-                if skip_if_hash_matches(output, old, config["downloads"]["chunk_size_bytes"]):
-                    continue
-                if old is not None:
-                    raise FrozenSourceError(f"SOURCES.md has a row for missing frozen file {relative}; refusing replacement.")
-                dataset = load_dataset(settings["repo"], language, split=split, revision=revision, token=token)
-                table = dataset.data.table
-                if "sentence" not in table.column_names:
-                    raise SourceError(f"Unexpected FLORES+ fields for {split}/{language}: {table.column_names}")
-                for column_index, field in enumerate(table.schema):
-                    if pa.types.is_string(field.type) or pa.types.is_large_string(field.type):
-                        normalized = pa.array((normalize_nfc(value) if value is not None else None for value in table.column(field.name).to_pylist()), type=field.type)
-                        table = table.set_column(column_index, field, normalized)
-                output.parent.mkdir(parents=True, exist_ok=True)
-                with tempfile.NamedTemporaryFile("wb", dir=output.parent, prefix=".flores-", delete=False) as handle:
-                    temporary = Path(handle.name)
-                try:
-                    pq.write_table(table, temporary, compression="zstd", version="2.6")
-                    if output.exists():
-                        raise FrozenSourceError(f"Refusing to overwrite existing file {output}")
-                    os.replace(temporary, output)
-                finally:
-                    temporary.unlink(missing_ok=True)
-                record = source_record("flores", output, root.parent.parent, f"https://huggingface.co/datasets/{settings['repo']}/tree/{revision}", utc_now(), revision, "CC BY-SA 4.0", config["downloads"]["chunk_size_bytes"])
-                records[relative] = record
-                write_sources(sources_path, records.values())
-    except DatasetNotFoundError:
-        logger.warning("FLORES+ gated access denied. Accept/request access on %s, then retry with an HF_TOKEN authorized for this dataset; continuing with other sources.", settings["page"])
-        print(f"FLORES+ access denied. On {settings['page']}, accept/request access to the gated dataset, then retry with an authorized HF_TOKEN.")
+                if output.exists():
+                    if old is None:
+                        raise FrozenSourceError(f"File already exists without a SOURCES.md hash; refusing overwrite: {output}")
+                    if old.version != version:
+                        raise FrozenSourceError(
+                            f"Frozen FLORES provenance version mismatch for {relative}: "
+                            f"SOURCES.md={old.version!r}, expected={version!r}"
+                        )
+                    if not skip_if_hash_matches(output, old, config["downloads"]["chunk_size_bytes"]):
+                        raise FrozenSourceError(f"SOURCES.md has a row for missing frozen file {relative}")
+                    mapped, variants = validate_flores_output_table(pq.read_table(output), split=split, language=language)
+                else:
+                    if old is not None:
+                        raise FrozenSourceError(f"SOURCES.md has a row for missing frozen file {relative}; refusing replacement.")
+                    dataset = load_dataset(settings["repo"], language, split=split, revision=revision, token=token)
+                    mapped, variants = map_flores_source_table(dataset.data.table, split=split, language=language)
+                    pending[(split, language)] = output
+                tables[(split, language)] = mapped
+                logger.info("FLORES variant counts | %s | %s | %s", split, language, variants)
+                if len(variants) > 1:
+                    logger.warning(
+                        "FLORES has multiple variant values | %s | %s | %s; retaining all rows, selecting no variant",
+                        split, language, variants,
+                    )
+                logger.info("FLORES rows | %s | %s | %d", split, language, mapped.num_rows)
+
+        validate_flores_alignment(tables, splits=settings["splits"], languages=settings["languages"])
+        for split in settings["splits"]:
+            row_counts = {language: tables[(split, language)].num_rows for language in settings["languages"]}
+            logger.info("FLORES aligned row counts | %s | %s", split, row_counts)
+
+        # Do not write any partition until all ten have passed schema, uniqueness,
+        # non-empty sentence, variant reporting, and parallel-ID checks.
+        for (split, language), output in sorted(pending.items()):
+            relative = output.resolve().relative_to(root.parent.parent.resolve()).as_posix()
+            table = tables[(split, language)]
+            output.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile("wb", dir=output.parent, prefix=".flores-", delete=False) as handle:
+                temporary = Path(handle.name)
+            try:
+                pq.write_table(table, temporary, compression="zstd", version="2.6")
+                if output.exists():
+                    raise FrozenSourceError(f"Refusing to overwrite existing file {output}")
+                os.replace(temporary, output)
+            finally:
+                temporary.unlink(missing_ok=True)
+            record = source_record(
+                "flores", output, root.parent.parent, output_url, utc_now(), version,
+                "CC BY-SA 4.0", config["downloads"]["chunk_size_bytes"],
+            )
+            records[relative] = record
+            write_sources(sources_path, records.values())
     except HfHubHTTPError as exc:
         status = getattr(getattr(exc, "response", None), "status_code", None)
-        if status not in (401, 403):
-            raise
-        logger.warning("FLORES+ gated access denied (HTTP %s). Log into Hugging Face, accept the FLORES+ terms at %s, and use an HF_TOKEN with access; continuing with other sources.", status, settings["page"])
+        if status in (401, 403):
+            raise SourceError(
+                f"FLORES+ access denied (HTTP {status}) at {settings['page']}: {exc}"
+            ) from exc
+        raise
+    except DatasetNotFoundError as exc:
+        raise SourceError(f"FLORES+ dataset/split unavailable at {settings['page']}: {exc}") from exc
 
 
 def choose_device(torch_module) -> str:

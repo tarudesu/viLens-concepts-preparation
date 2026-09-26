@@ -33,7 +33,7 @@ class CharTokenizer:
 
 def test_09b_concreteness_exact_head_none_and_blank_score() -> None:
     step = load_script("09b_concreteness.py")
-    norms = {"ice cream": 4.31, "food": 4.80, "known blank": None}
+    norms = {("ice cream", 1): 4.31, ("food", 0): 4.80, ("known blank", 1): None}
 
     class FakeNLP:
         def __call__(self, text: str):
@@ -51,12 +51,42 @@ def test_09b_concreteness_exact_head_none_and_blank_score() -> None:
 def test_09b_reads_fixture_norms_and_rejects_unexpected_headers(tmp_path: Path) -> None:
     step = load_script("09b_concreteness.py")
     norms = step.load_norms(FIXTURES / "brysbaert_concreteness.csv", word_column="Word", value_column="Conc.M")
-    assert norms["ice cream"] == 4.31
-    assert norms["known blank"] is None
+    assert norms[("ice cream", 1)] == 4.31
+    assert norms[("known blank", 1)] is None
     invalid = tmp_path / "wrong.csv"
     invalid.write_text("term,score\na,1\n", encoding="utf-8")
     with pytest.raises(ValueError, match="Unexpected Brysbaert CSV headers"):
         step.load_norms(invalid, word_column="Word", value_column="Conc.M")
+
+
+def test_09b_xlsx_bigram_exact_head_fallback_and_duplicate_resolution(tmp_path: Path, caplog) -> None:
+    import pandas as pd
+
+    step = load_script("09b_concreteness.py")
+    workbook = tmp_path / "norms.xlsx"
+    pd.DataFrame([
+        {"Word": " CAT ", "Bigram": 0, "Conc.M": 4.2, "Total": 10},
+        {"Word": "cat", "Bigram": 0, "Conc.M": 3.1, "Total": 8},
+        {"Word": "ice cream", "Bigram": 1, "Conc.M": 4.8, "Total": 23},
+        {"Word": "food", "Bigram": 0, "Conc.M": 4.0, "Total": 12},
+    ]).to_excel(workbook, index=False)
+    with caplog.at_level(logging.WARNING, logger=step.STEP):
+        norms = step.load_norms(
+            workbook, word_column="Word", value_column="Conc.M", bigram_column="Bigram",
+            raters_column="Total",
+        )
+
+    class FakeNLP:
+        def __call__(self, text: str):
+            assert text == "cat food"
+            return [SimpleNamespace(pos_="NOUN", dep_="compound", lemma_="cat", text="cat"),
+                    SimpleNamespace(pos_="NOUN", dep_="ROOT", lemma_="food", text="food")]
+
+    assert norms[("cat", 0)] == 4.2
+    assert step.match_concreteness("cat", "noun", norms, FakeNLP()) == (4.2, "exact")
+    assert step.match_concreteness("ice cream", "noun", norms, FakeNLP()) == (4.8, "exact")
+    assert step.match_concreteness("cat food", "noun", norms, FakeNLP()) == (4.0, "head")
+    assert "Duplicate normalized Brysbaert Word='cat'" in caplog.text
 
 
 def test_09b_missing_inputs_diagnostic(tmp_path: Path) -> None:
