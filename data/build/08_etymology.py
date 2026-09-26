@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter, defaultdict
 import gzip
+from itertools import islice, product
 import json
 import logging
 import math
@@ -16,6 +17,7 @@ import time
 from typing import Any, Iterable
 
 import numpy as np
+import nltk
 import pyarrow as pa
 import pyarrow.parquet as pq
 import spacy
@@ -220,13 +222,53 @@ def extract_han_strings(values: Iterable[str], cjk_ranges: list[list[int]], syll
     return sorted(result)
 
 
-def collect_han_strings(entries: list[dict[str, Any]], cjk_ranges: list[list[int]], syllable_count: int) -> list[str]:
-    """Gather CJK arguments of vi-etym-sino templates and CJK entry forms."""
-    values: list[str] = []
+def _template_variant_groups(args: dict[str, Any], cjk_ranges: list[list[int]], split_on: str) -> list[list[str]]:
+    """Return Han-only positional template arguments as ordered variant groups."""
+    groups: list[list[str]] = []
+    positional = sorted(
+        ((int(key), value) for key, value in args.items() if str(key).isdigit()),
+        key=lambda item: item[0],
+    )
+    for _, value in positional:
+        if not isinstance(value, str):
+            continue
+        variants = sorted({normalize_nfc(piece.strip()) for piece in value.split(split_on) if piece.strip()})
+        if variants and all(all(is_cjk(character, cjk_ranges) for character in variant) for variant in variants):
+            groups.append(variants)
+    return groups
+
+
+def extract_sino_template_strings(
+    entries: list[dict[str, Any]], cjk_ranges: list[list[int]], syllable_count: int,
+    *, split_on: str, max_combinations: int,
+) -> list[str]:
+    """Build length-matched Han strings from positional Han/gloss template args."""
+    if not split_on:
+        raise ValueError("Template variant separator must be non-empty")
+    if type(max_combinations) is not int or max_combinations < 1:
+        raise ValueError("Maximum template combinations must be a positive integer")
+    result: set[str] = set()
     for entry in entries:
         for template in _templates(entry):
-            if str(template["name"]).casefold() == "vi-etym-sino":
-                values.extend(value for value in template.get("args", {}).values() if isinstance(value, str))
+            if str(template["name"]).casefold() != "vi-etym-sino":
+                continue
+            groups = _template_variant_groups(template.get("args", {}), cjk_ranges, split_on)
+            if not groups:
+                continue
+            for combination in islice(product(*groups), max_combinations):
+                candidate = "".join(combination)
+                if len(candidate) == syllable_count:
+                    result.add(candidate)
+    return sorted(result)
+
+
+def collect_han_strings(
+    entries: list[dict[str, Any]], cjk_ranges: list[list[int]], syllable_count: int,
+    *, split_on: str, max_combinations: int,
+) -> list[str]:
+    """Gather template-product strings plus length-matched CJK forms."""
+    form_values: list[str] = []
+    for entry in entries:
         forms = entry.get("forms", [])
         if forms is None:
             forms = []
@@ -235,8 +277,12 @@ def collect_han_strings(entries: list[dict[str, Any]], cjk_ranges: list[list[int
         for form in forms:
             if not isinstance(form, dict) or not isinstance(form.get("form"), str):
                 raise ValueError(f"Malformed form in Vietnamese entry {entry.get('word')!r}: {form!r}")
-            values.append(form["form"])
-    return extract_han_strings(values, cjk_ranges, syllable_count)
+            form_values.append(form["form"])
+    template_strings = extract_sino_template_strings(
+        entries, cjk_ranges, syllable_count, split_on=split_on, max_combinations=max_combinations,
+    )
+    form_strings = extract_han_strings(form_values, cjk_ranges, syllable_count)
+    return sorted(set(template_strings) | set(form_strings))
 
 
 def load_unihan(readings_path: str | Path, variants_path: str | Path) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
@@ -335,20 +381,111 @@ def variant_closure(character: str, variants: dict[str, set[str]]) -> set[str]:
     return found
 
 
-def reading_matches(han_string: str, canonical_vi: str, readings: dict[str, set[str]], variants: dict[str, set[str]]) -> bool:
-    """Compare each Han character's Unihan reading with the corresponding VI syllable."""
+def _single_character_readings(entry: dict[str, Any], cjk_ranges: list[list[int]]) -> set[str]:
+    """Collect explicit Hán-Việt readings plus romanization/head transliterations."""
+    word = entry.get("word")
+    if not isinstance(word, str) or len(word) != 1 or not is_cjk(word, cjk_ranges):
+        return set()
+    found: set[str] = set()
+
+    def add_reading(value: Any) -> None:
+        if not isinstance(value, str):
+            return
+        normalized = normalize_nfc(value).strip()
+        if not normalized or any(is_cjk(character, cjk_ranges) for character in normalized):
+            return
+        for reading in re.split(r"[,;/]", normalized):
+            reading = normalize_nfc(reading.strip())
+            if reading and not any(is_cjk(character, cjk_ranges) for character in reading):
+                found.add(reading)
+
+    forms = entry.get("forms") or []
+    if not isinstance(forms, list):
+        raise ValueError(f"Unexpected forms on single-character Vietnamese entry {word!r}")
+    for form in forms:
+        if not isinstance(form, dict) or not isinstance(form.get("form"), str):
+            raise ValueError(f"Malformed form on single-character Vietnamese entry {word!r}: {form!r}")
+        tags = form.get("tags") or []
+        raw_tags = form.get("raw_tags") or []
+        if not isinstance(tags, list) or not isinstance(raw_tags, list):
+            raise ValueError(f"Malformed form tags on single-character Vietnamese entry {word!r}: {form!r}")
+        tag_names = {str(tag).casefold() for tag in [*tags, *raw_tags]}
+        value = normalize_nfc(form["form"])
+        marker = re.search(r"hán[- ]việt readings?\s*:\s*(.+)$", value, flags=re.IGNORECASE)
+        if marker:
+            add_reading(marker.group(1))
+        elif tag_names.intersection({"romanization", "canonical", "hán-nôm", "han-viet-reading"}):
+            add_reading(value)
+
+    head_templates = entry.get("head_templates") or []
+    if not isinstance(head_templates, list):
+        raise ValueError(f"Unexpected head_templates on single-character Vietnamese entry {word!r}")
+    for template in head_templates:
+        if not isinstance(template, dict) or not isinstance(template.get("name"), str):
+            raise ValueError(f"Malformed head template on single-character Vietnamese entry {word!r}: {template!r}")
+        args = template.get("args") or {}
+        if not isinstance(args, dict):
+            raise ValueError(f"Malformed head-template args on single-character Vietnamese entry {word!r}: {template!r}")
+        add_reading(args.get("tr"))
+        if template["name"].casefold().startswith("vi-"):
+            add_reading(args.get("1"))
+
+    senses = entry.get("senses") or []
+    if not isinstance(senses, list):
+        raise ValueError(f"Unexpected senses on single-character Vietnamese entry {word!r}")
+    for sense in senses:
+        if not isinstance(sense, dict):
+            raise ValueError(f"Malformed sense on single-character Vietnamese entry {word!r}: {sense!r}")
+        related = sense.get("related") or []
+        if not isinstance(related, list):
+            raise ValueError(f"Unexpected related readings on single-character Vietnamese entry {word!r}")
+        for item in related:
+            if not isinstance(item, dict):
+                raise ValueError(f"Malformed related reading on single-character Vietnamese entry {word!r}: {item!r}")
+            tags = item.get("tags") or []
+            if not isinstance(tags, list):
+                raise ValueError(f"Malformed related-reading tags on {word!r}: {item!r}")
+            if "han-viet-reading" in {str(tag).casefold() for tag in tags}:
+                add_reading(item.get("word"))
+    return found
+
+
+def reading_match_source(
+    han_string: str, canonical_vi: str, readings: dict[str, set[str]],
+    variants: dict[str, set[str]], wiktionary_readings: dict[str, set[str]],
+) -> str | None:
+    """Return Unihan or Wiktionary fallback when every Han character reading matches."""
     syllables = vi_orth_key(canonical_vi).split()
     if len(han_string) != len(syllables):
-        return False
+        return None
+    used_fallback = False
     for character, syllable in zip(han_string, syllables, strict=True):
-        accepted = {
+        variant_chars = variant_closure(character, variants)
+        target_key = vi_orth_key(syllable)
+        unihan_keys = {
             vi_orth_key(reading)
-            for variant in variant_closure(character, variants)
+            for variant in variant_chars
             for reading in readings.get(variant, set())
         }
-        if vi_orth_key(syllable) not in accepted:
-            return False
-    return True
+        if target_key in unihan_keys:
+            continue
+        fallback_keys = {
+            vi_orth_key(reading)
+            for variant in variant_chars
+            for reading in wiktionary_readings.get(variant, set())
+        }
+        if target_key not in fallback_keys:
+            return None
+        used_fallback = True
+    return "wiktionary_char" if used_fallback else "unihan"
+
+
+def reading_matches(
+    han_string: str, canonical_vi: str, readings: dict[str, set[str]],
+    variants: dict[str, set[str]], wiktionary_readings: dict[str, set[str]] | None = None,
+) -> bool:
+    """Compare per-character Hán-Việt readings using Unihan then local fallback."""
+    return reading_match_source(han_string, canonical_vi, readings, variants, wiktionary_readings or {}) is not None
 
 
 def cedict_forms(han_string: str, t2s: OpenCC, s2t: OpenCC) -> list[str]:
@@ -356,29 +493,90 @@ def cedict_forms(han_string: str, t2s: OpenCC, s2t: OpenCC) -> list[str]:
     return sorted({normalize_nfc(han_string), normalize_nfc(t2s.convert(han_string)), normalize_nfc(s2t.convert(han_string))})
 
 
-def candidate_failure(reading_ok: bool, headword_found: bool, overlap_count: int, overlap_min: int) -> str | None:
-    """Return the first failed Signal-B check, or None when all checks pass."""
-    if not reading_ok:
-        return "reading"
-    if not headword_found:
-        return "not_in_cedict"
-    if overlap_count < overlap_min:
-        return "meaning"
-    return None
+def evaluate_b_candidate(
+    reading_ok: bool, headword_found: bool, overlap_count: int, overlap_min: int, syllable_count: int,
+) -> dict[str, Any]:
+    """Evaluate primary, strict and relaxed Signal B rules for one Han candidate."""
+    if type(syllable_count) is not int or syllable_count < 1:
+        raise ValueError("Signal-B syllable count must be a positive integer")
+    relaxed_pass = reading_ok and headword_found
+    meaning_pass = overlap_count >= overlap_min
+    strict_pass = relaxed_pass and meaning_pass
+    primary_pass = relaxed_pass and (syllable_count >= 2 or meaning_pass)
+    if primary_pass:
+        failure = None
+    elif not reading_ok:
+        failure = "reading"
+    elif not headword_found:
+        failure = "not_in_cedict"
+    else:
+        failure = "meaning"
+    return {
+        "primary_pass": primary_pass,
+        "strict_pass": strict_pass,
+        "relaxed_pass": relaxed_pass,
+        "failure_reason": failure,
+    }
 
 
-def summarize_signal_b(candidate_results: list[dict[str, Any]]) -> tuple[str, str, str | None]:
-    """Aggregate per-Han checks into strict/relaxed B classes and a first failure."""
+def summarize_signal_b(candidate_results: list[dict[str, Any]]) -> tuple[str, str, str, str | None]:
+    """Aggregate per-Han checks into primary, strict, relaxed classes and a failure."""
     if not candidate_results:
-        return "nonsino", "nonsino", "no_han_string"
-    if any(item["failure_reason"] is None for item in candidate_results):
-        return "sino", "sino", None
-    relaxed = any(item["reading_ok"] and item["headword_found"] for item in candidate_results)
-    if relaxed:
-        return "nonsino", "sino", "meaning"
-    if any(item["reading_ok"] for item in candidate_results):
-        return "nonsino", "nonsino", "not_in_cedict"
-    return "nonsino", "nonsino", "reading"
+        return "nonsino", "nonsino", "nonsino", "no_han_string"
+    primary = any(item["primary_pass"] for item in candidate_results)
+    strict = any(item["strict_pass"] for item in candidate_results)
+    relaxed = any(item["relaxed_pass"] for item in candidate_results)
+    if primary:
+        failure = None
+    elif not any(item["reading_ok"] for item in candidate_results):
+        failure = "reading"
+    elif not any(item["reading_ok"] and item["headword_found"] for item in candidate_results):
+        failure = "not_in_cedict"
+    else:
+        failure = "meaning"
+    return (
+        "sino" if primary else "nonsino",
+        "sino" if strict else "nonsino",
+        "sino" if relaxed else "nonsino",
+        failure,
+    )
+
+
+def load_local_wordnet(data_dir: str | Path) -> tuple[Any, str]:
+    """Load WordNet only from the supplied local NLTK data directory."""
+    local_dir = Path(data_dir).resolve()
+    nltk.data.path = [str(local_dir)]
+    from nltk.corpus import wordnet
+
+    try:
+        wordnet.ensure_loaded()
+        version = wordnet.get_version()
+        wordnet.synsets("entity")
+    except LookupError as exc:
+        raise RuntimeError(
+            f"Local NLTK WordNet corpus is missing or unreadable under {local_dir}. "
+            "Run step 01 with --only wordnet; step 08 does not access the network."
+        ) from exc
+    return wordnet, version
+
+
+def wordnet_synonyms(wordnet_reader: Any, lemma: str) -> list[str]:
+    """Return deterministic WordNet lemma names for an English lemma or phrase."""
+    normalized = normalize_nfc(lemma).casefold().strip()
+    queries = sorted({normalized, normalized.replace(" ", "_")})
+    synonyms: set[str] = set()
+    for query in queries:
+        for synset in wordnet_reader.synsets(query):
+            for name in synset.lemma_names():
+                synonym = normalize_nfc(name.replace("_", " ")).strip()
+                if synonym:
+                    synonyms.add(synonym)
+    return sorted(synonyms)
+
+
+def max_content_lemma_overlap(target_lemmas: set[str], gloss_lemma_sets: Iterable[set[str]]) -> int:
+    """Return the largest content-lemma intersection with any candidate gloss."""
+    return max((len(target_lemmas.intersection(gloss_lemmas)) for gloss_lemmas in gloss_lemma_sets), default=0)
 
 
 def cohens_kappa(left: list[str], right: list[str]) -> float | None:
@@ -433,9 +631,12 @@ def minimum_detectable_difference(n1: int, n2: int, *, alpha: float, power: floa
     return (normal.inv_cdf(1.0 - alpha / 2.0) + normal.inv_cdf(power)) * math.sqrt(1.0 / n1 + 1.0 / n2)
 
 
-def _read_canonical_entries(path: Path, keys: set[str], logger: logging.Logger, progress_every: int) -> dict[str, list[dict[str, Any]]]:
-    """Stream the VI dump and retain only entries matching requested canonical keys."""
+def _read_canonical_entries(
+    path: Path, keys: set[str], cjk_ranges: list[list[int]], logger: logging.Logger, progress_every: int,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, set[str]]]:
+    """Stream matching entries and index readings on single-CJK-headword entries."""
     found: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    character_readings: dict[str, set[str]] = defaultdict(set)
     entry_count = 0
     for entry_count, entry in enumerate(iter_jsonl(path), start=1):
         if not isinstance(entry, dict):
@@ -447,13 +648,15 @@ def _read_canonical_entries(path: Path, keys: set[str], logger: logging.Logger, 
         key = vi_orth_key(word)
         if key in keys:
             found[key].append(entry)
+        if len(word) == 1 and is_cjk(word, cjk_ranges):
+            character_readings[word].update(_single_character_readings(entry, cjk_ranges))
         if entry_count % progress_every == 0:
             logger.info("Streamed Vietnamese entries: %d", entry_count)
     logger.info("Streamed Vietnamese entries: %d (end of dump)", entry_count)
     missing = sorted(keys - set(found))
     if missing:
         raise ValueError(f"Canonical VI forms have no matching Wiktextract homograph entries ({len(missing)}): {missing[:20]!r}")
-    return dict(found)
+    return dict(found), dict(character_readings)
 
 
 def _scope_entries(entries: list[dict[str, Any]], pos: str) -> tuple[list[dict[str, Any]], str]:
@@ -524,7 +727,8 @@ def run(config_path: str) -> dict[str, Any]:
             "sinitic_codes", "sinitic_prefixes", "sino_japanese_codes", "loan_templates",
             "calque_templates", "native_markers_text", "native_templates", "gloss_overlap_min",
             "bootstrap_resamples", "bootstrap_confidence", "power_alpha", "power_holm_comparisons",
-            "power_target", "report", "paths",
+            "power_target", "report", "paths", "template_variant_separator", "max_template_combinations",
+            "h3_confirmatory_kappa_lower_min", "h3_confirmatory_holm_mde_max",
         )
         missing_settings = [key for key in required_settings if key not in settings]
         if missing_settings:
@@ -533,12 +737,21 @@ def run(config_path: str) -> dict[str, Any]:
             raise ValueError("etymology.gloss_overlap_min must be a positive integer")
         if type(settings["power_holm_comparisons"]) is not int or settings["power_holm_comparisons"] < 1:
             raise ValueError("etymology.power_holm_comparisons must be a positive integer")
+        if type(settings["max_template_combinations"]) is not int or settings["max_template_combinations"] < 1:
+            raise ValueError("etymology.max_template_combinations must be a positive integer")
+        if not 0.0 < float(settings["h3_confirmatory_kappa_lower_min"]) <= 1.0:
+            raise ValueError("etymology.h3_confirmatory_kappa_lower_min must be in (0, 1]")
+        if not 0.0 < float(settings["h3_confirmatory_holm_mde_max"]):
+            raise ValueError("etymology.h3_confirmatory_holm_mde_max must be positive")
+        wordnet_reader, wordnet_version = load_local_wordnet(paths["nltk_data"])
+        logger.info("Loaded local NLTK WordNet %s from %s; nltk.data.path restricted to this directory",
+                    wordnet_version, Path(paths["nltk_data"]).resolve())
         report = settings["report"]
         input_path = Path(paths["input"])
         table = pq.read_table(input_path)
         required_columns = {
             "concept_id", "en_lemma", "pos", "sense_gloss", "split", "vi_canonical",
-            "post_promotion_survives",
+            "post_promotion_survives", "zh_nllb_agree", "fr_nllb_agree", "id_nllb_agree",
         }
         missing_columns = sorted(required_columns - set(table.column_names))
         if missing_columns:
@@ -557,16 +770,22 @@ def run(config_path: str) -> dict[str, Any]:
             for field in ("concept_id", "en_lemma", "pos", "sense_gloss", "vi_canonical"):
                 if not isinstance(row[field], str) or not row[field].strip():
                     raise ValueError(f"Step-07 row {row.get('concept_id')!r} has missing/malformed {field}")
+            for field in ("zh_nllb_agree", "fr_nllb_agree", "id_nllb_agree"):
+                if type(row[field]) is not bool:
+                    raise ValueError(f"Step-07 row {row.get('concept_id')!r} has missing/malformed {field}")
 
         cjk_ranges = config["inspection"]["cjk_ranges"]
         if not isinstance(cjk_ranges, list) or not cjk_ranges:
             raise ValueError("inspection.cjk_ranges must define CJK code point ranges")
         canonical_keys = {vi_orth_key(row["vi_canonical"]) for row in rows}
-        entries_by_key = _read_canonical_entries(
-            Path(paths["vietnamese_dump"]), canonical_keys, logger, int(config["logging"]["progress_every"]),
+        entries_by_key, wiktionary_readings = _read_canonical_entries(
+            Path(paths["vietnamese_dump"]), canonical_keys, cjk_ranges, logger,
+            int(config["logging"]["progress_every"]),
         )
         logger.info("Matched canonical Vietnamese forms to homograph entries: %d/%d unique forms",
                     len(entries_by_key), len(canonical_keys))
+        logger.info("Indexed Wiktextract fallback readings for %d single-CJK headwords (%d readings)",
+                    len(wiktionary_readings), sum(len(values) for values in wiktionary_readings.values()))
         readings, variants = load_unihan(paths["unihan_readings"], paths["unihan_variants"])
         logger.info("Loaded Unihan kVietnamese readings for %d characters and variant links for %d characters",
                     len(readings), len(variants))
@@ -584,13 +803,38 @@ def run(config_path: str) -> dict[str, Any]:
             entry_results = [classify_entry_a(entry, settings, cjk_ranges) for entry in scoped]
             signal_a, sino_via, other_sources, native_strict = aggregate_signal_a(entry_results)
             syllable_count = len(vi_orth_key(canonical).split())
-            han_strings = collect_han_strings(scoped, cjk_ranges, syllable_count)
+            han_strings = collect_han_strings(
+                scoped, cjk_ranges, syllable_count,
+                split_on=str(settings["template_variant_separator"]),
+                max_combinations=int(settings["max_template_combinations"]),
+            )
             candidate_forms: dict[str, list[str]] = {}
             for han_string in han_strings:
                 forms = cedict_forms(han_string, t2s, s2t)
                 candidate_forms[han_string] = sorted({form for form in forms if form in cedict})
-            target_text = normalize_nfc(f"{row['en_lemma']} {row['sense_gloss']}").strip()
-            target_texts.add(target_text)
+            gloss_texts: set[str] = set()
+            for entry in scoped:
+                senses = entry.get("senses") or []
+                if not isinstance(senses, list):
+                    raise ValueError(f"Unexpected senses in Vietnamese entry {entry.get('word')!r}")
+                for sense in senses:
+                    if not isinstance(sense, dict):
+                        raise ValueError(f"Malformed sense in Vietnamese entry {entry.get('word')!r}: {sense!r}")
+                    glosses = sense.get("glosses") or []
+                    if not isinstance(glosses, list):
+                        raise ValueError(f"Unexpected glosses in Vietnamese entry {entry.get('word')!r}")
+                    for gloss in glosses:
+                        if not isinstance(gloss, str):
+                            raise ValueError(f"Malformed gloss in Vietnamese entry {entry.get('word')!r}: {gloss!r}")
+                        if gloss.strip():
+                            gloss_texts.add(normalize_nfc(gloss).strip())
+            synonyms = wordnet_synonyms(wordnet_reader, row["en_lemma"])
+            meaning_texts = sorted({
+                normalize_nfc(text).strip()
+                for text in [row["en_lemma"], row["sense_gloss"], *gloss_texts, *synonyms]
+                if isinstance(text, str) and text.strip()
+            })
+            target_texts.update(meaning_texts)
             candidate_glosses = sorted({gloss for values in candidate_forms.values() for form in values for gloss in cedict[form]})
             target_texts.update(candidate_glosses)
             candidate_stage.append({
@@ -599,7 +843,8 @@ def run(config_path: str) -> dict[str, Any]:
                 "signal_a": signal_a, "sino_via": sino_via,
                 "other_loan_sources": other_sources, "native_strict": native_strict,
                 "han_strings": han_strings, "candidate_forms": candidate_forms,
-                "target_text": target_text,
+                "meaning_texts": meaning_texts,
+                "nllb_all_agree": all(row[field] is True for field in ("zh_nllb_agree", "fr_nllb_agree", "id_nllb_agree")),
             })
 
         try:
@@ -622,28 +867,34 @@ def run(config_path: str) -> dict[str, Any]:
         for item in candidate_stage:
             row = item["row"]
             canonical = row["vi_canonical"]
-            target_lemmas = lemma_sets[item["target_text"]]
+            target_lemmas: set[str] = set()
+            for meaning_text in item["meaning_texts"]:
+                target_lemmas.update(lemma_sets[meaning_text])
             checks: list[dict[str, Any]] = []
             for han_string in item["han_strings"]:
-                reading_ok = reading_matches(han_string, canonical, readings, variants)
+                reading_source = reading_match_source(
+                    han_string, canonical, readings, variants, wiktionary_readings,
+                )
+                reading_ok = reading_source is not None
                 headwords = item["candidate_forms"][han_string]
                 glosses = sorted({gloss for headword in headwords for gloss in cedict[headword]})
-                overlap_count = max(
-                    (len(target_lemmas.intersection(lemma_sets[gloss])) for gloss in glosses),
-                    default=0,
+                overlap_count = max_content_lemma_overlap(target_lemmas, (lemma_sets[gloss] for gloss in glosses))
+                evaluation = evaluate_b_candidate(
+                    reading_ok, bool(headwords), overlap_count,
+                    int(settings["gloss_overlap_min"]), len(vi_orth_key(canonical).split()),
                 )
-                failure = candidate_failure(reading_ok, bool(headwords), overlap_count, int(settings["gloss_overlap_min"]))
                 checks.append({
                     "han_string": han_string,
                     "reading_ok": reading_ok,
+                    "reading_source": reading_source,
                     "headword_found": bool(headwords),
                     "meaning_overlap": overlap_count,
-                    "failure_reason": failure,
+                    **evaluation,
                     "cedict_glosses": glosses,
                 })
-            signal_b, signal_b_relaxed, failure_reason = summarize_signal_b(checks)
+            signal_b, signal_b_strict, signal_b_relaxed, failure_reason = summarize_signal_b(checks)
             stratum = classify_stratum(item["signal_a"], signal_b)
-            passing = [check for check in checks if check["failure_reason"] is None]
+            passing = [check for check in checks if check["primary_pass"]]
             item["output"] = {
                 **row,
                 "entry_scope": item["entry_scope"],
@@ -654,12 +905,14 @@ def run(config_path: str) -> dict[str, Any]:
                 "native_strict": item["native_strict"],
                 "han_strings": item["han_strings"],
                 "signal_b": signal_b,
+                "signal_b_strict": signal_b_strict,
                 "signal_b_relaxed": signal_b_relaxed,
                 "signal_b_failure_reason": failure_reason,
                 "verified_han_string": passing[0]["han_string"] if passing else None,
                 "verified_cedict_glosses": passing[0]["cedict_glosses"] if passing else [],
                 "han_verifications": checks,
                 "stratum": stratum,
+                "nllb_all_agree": item["nllb_all_agree"],
             }
             enriched.append(item["output"])
 
@@ -674,20 +927,23 @@ def run(config_path: str) -> dict[str, Any]:
 
         kappa_rows = [row for row in enriched if row["signal_a"] in {"sino", "nonsino"}]
         a_labels = [row["signal_a"] for row in kappa_rows]
-        b_labels = [row["signal_b"] for row in kappa_rows]
-        relaxed_labels = [row["signal_b_relaxed"] for row in kappa_rows]
-        kappa, ci_low, ci_high = bootstrap_kappa_ci(
-            a_labels, b_labels, resamples=int(settings["bootstrap_resamples"]),
-            confidence=float(settings["bootstrap_confidence"]), seed=int(config["seed"]),
-        )
-        relaxed_kappa = cohens_kappa(a_labels, relaxed_labels)
-        logger.info("Cohen kappa (A sino/nonsino vs B): n=%d | kappa=%s | bootstrap_CI_%g=[%s, %s]",
-                    len(kappa_rows), f"{kappa:.6f}" if kappa is not None else "NA",
-                    float(settings["bootstrap_confidence"]),
-                    f"{ci_low:.6f}" if ci_low is not None else "NA",
-                    f"{ci_high:.6f}" if ci_high is not None else "NA")
-        logger.info("Cohen kappa (A sino/nonsino vs B_relaxed): n=%d | kappa=%s",
-                    len(kappa_rows), f"{relaxed_kappa:.6f}" if relaxed_kappa is not None else "NA")
+        kappa_results: dict[str, tuple[float | None, float | None, float | None]] = {}
+        for label, field in (
+            ("primary", "signal_b"), ("strict", "signal_b_strict"), ("relaxed", "signal_b_relaxed"),
+        ):
+            b_labels = [row[field] for row in kappa_rows]
+            result = bootstrap_kappa_ci(
+                a_labels, b_labels, resamples=int(settings["bootstrap_resamples"]),
+                confidence=float(settings["bootstrap_confidence"]), seed=int(config["seed"]),
+            )
+            kappa_results[label] = result
+            estimate, lower, upper = result
+            logger.info("Cohen kappa (%s B): n=%d | kappa=%s | bootstrap_CI_%g=[%s, %s]",
+                        label, len(kappa_rows), f"{estimate:.6f}" if estimate is not None else "NA",
+                        float(settings["bootstrap_confidence"]),
+                        f"{lower:.6f}" if lower is not None else "NA",
+                        f"{upper:.6f}" if upper is not None else "NA")
+        kappa, ci_low, ci_high = kappa_results["primary"]
 
         syllable_bins = report["syllable_bins"]
         if not isinstance(syllable_bins, list) or len(syllable_bins) != 2:
@@ -696,9 +952,19 @@ def run(config_path: str) -> dict[str, Any]:
         by_pos_bucket: Counter[tuple[str, str, str]] = Counter()
         single_syllable: Counter[tuple[str, str]] = Counter()
         sino_via_counts: Counter[str] = Counter()
+        nllb_agreement: Counter[str] = Counter()
+        verified_string_count = 0
+        verified_wiktionary_count = 0
         for row in enriched:
             split = row["split"]
             stratum_counts[split][row["stratum"]] += 1
+            if row["nllb_all_agree"]:
+                nllb_agreement[split] += 1
+            for check in row["han_verifications"]:
+                if check["primary_pass"]:
+                    verified_string_count += 1
+                    if check["reading_source"] == "wiktionary_char":
+                        verified_wiktionary_count += 1
             if split == "test":
                 bucket = _syllable_bucket(row["vi_canonical"], syllable_bins)
                 by_pos_bucket[(row["pos"], bucket, row["stratum"])] += 1
@@ -716,6 +982,13 @@ def run(config_path: str) -> dict[str, Any]:
         logger.info("TEST single-syllable counts by stratum:")
         for stratum in STRATA:
             logger.info("%s | %d", stratum, single_syllable[(stratum, "test")])
+        logger.info("NLLB robustness subset (all zh/fr/id agree):")
+        for split in SPLITS:
+            total_split = sum(row["split"] == split for row in enriched)
+            logger.info("%s | %d/%d", split, nllb_agreement[split], total_split)
+        logger.info("Verified strings relying on Wiktionary character readings: %d/%d (%.6f)",
+                    verified_wiktionary_count, verified_string_count,
+                    verified_wiktionary_count / verified_string_count if verified_string_count else 0.0)
 
         sino_failures = [row for row in enriched if row["signal_a"] == "sino" and row["signal_b"] == "nonsino"]
         failure_groups: dict[str, list[dict[str, Any]]] = {reason: [] for reason in FAILURE_REASONS}
@@ -750,6 +1023,7 @@ def run(config_path: str) -> dict[str, Any]:
         n_comparison = int(settings["power_holm_comparisons"])
         alpha = float(settings["power_alpha"])
         target_power = float(settings["power_target"])
+        holm_mde_by_comparison: dict[str, float | None] = {}
         logger.info("Power (n1, n2, MDE d):")
         for label, first_n, second_n in (
             ("sino_vs_nonsino", n_sino, n_nonsino),
@@ -757,10 +1031,24 @@ def run(config_path: str) -> dict[str, Any]:
         ):
             unadjusted = minimum_detectable_difference(first_n, second_n, alpha=alpha, power=target_power)
             adjusted = minimum_detectable_difference(first_n, second_n, alpha=alpha / n_comparison, power=target_power)
+            holm_mde_by_comparison[label] = adjusted
             logger.info("%s | n1=%d | n2=%d | alpha=%.6f d=%s | holm_alpha=%.6f d=%s",
                         label, first_n, second_n, alpha,
                         f"{unadjusted:.6f}" if unadjusted is not None else "NA",
                         alpha / n_comparison, f"{adjusted:.6f}" if adjusted is not None else "NA")
+        h3_confirmatory = (
+            ci_low is not None
+            and ci_low >= float(settings["h3_confirmatory_kappa_lower_min"])
+            and holm_mde_by_comparison["sino_vs_nonsino"] is not None
+            and holm_mde_by_comparison["sino_vs_nonsino"] <= float(settings["h3_confirmatory_holm_mde_max"])
+        )
+        logger.info("H3 status rule: lower_primary_kappa_CI=%s (minimum=%.2f); Holm MDE=%s (maximum=%.2f); status=%s",
+                    f"{ci_low:.6f}" if ci_low is not None else "NA",
+                    float(settings["h3_confirmatory_kappa_lower_min"]),
+                    f"{holm_mde_by_comparison['sino_vs_nonsino']:.6f}"
+                    if holm_mde_by_comparison["sino_vs_nonsino"] is not None else "NA",
+                    float(settings["h3_confirmatory_holm_mde_max"]),
+                    "confirmatory" if h3_confirmatory else "exploratory")
 
         additions = [
             pa.field("entry_scope", pa.string()),
@@ -771,6 +1059,7 @@ def run(config_path: str) -> dict[str, Any]:
             pa.field("native_strict", pa.bool_()),
             pa.field("han_strings", pa.list_(pa.string())),
             pa.field("signal_b", pa.string()),
+            pa.field("signal_b_strict", pa.string()),
             pa.field("signal_b_relaxed", pa.string()),
             pa.field("signal_b_failure_reason", pa.string()),
             pa.field("verified_han_string", pa.string()),
@@ -778,12 +1067,17 @@ def run(config_path: str) -> dict[str, Any]:
             pa.field("han_verifications", pa.list_(pa.struct([
                 pa.field("han_string", pa.string()),
                 pa.field("reading_ok", pa.bool_()),
+                pa.field("reading_source", pa.string()),
                 pa.field("headword_found", pa.bool_()),
                 pa.field("meaning_overlap", pa.int64()),
+                pa.field("primary_pass", pa.bool_()),
+                pa.field("strict_pass", pa.bool_()),
+                pa.field("relaxed_pass", pa.bool_()),
                 pa.field("failure_reason", pa.string()),
                 pa.field("cedict_glosses", pa.list_(pa.string())),
             ]))),
             pa.field("stratum", pa.string()),
+            pa.field("nllb_all_agree", pa.bool_()),
         ]
         existing = set(table.schema.names)
         output_schema = pa.schema([*table.schema, *(field for field in additions if field.name not in existing)])

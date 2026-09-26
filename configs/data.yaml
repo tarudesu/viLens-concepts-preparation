@@ -140,11 +140,15 @@ etymology:
   native_markers_text: [Proto-Vietic, Proto-Mon-Khmer, Proto-Austroasiatic]
   native_templates: [inh, "inh+"]
   gloss_overlap_min: 1
+  template_variant_separator: "/"
+  max_template_combinations: 16
   bootstrap_resamples: 1000
   bootstrap_confidence: 0.95
   power_alpha: 0.05
   power_holm_comparisons: 6
   power_target: 0.80
+  h3_confirmatory_kappa_lower_min: 0.60
+  h3_confirmatory_holm_mde_max: 0.30
   report:
     failure_examples_per_reason: 10
     nonsino_sino_examples_max: 30
@@ -156,6 +160,7 @@ etymology:
     unihan_readings: data/raw/unihan/extracted/Unihan_Readings.txt
     unihan_variants: data/raw/unihan/extracted/Unihan_Variants.txt
     cedict: data/raw/cedict/cedict_1_0_ts_utf-8_mdbg.txt.gz
+    nltk_data: data/raw/nltk_data
 
 wikidata:
   enabled: true

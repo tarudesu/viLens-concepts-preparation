@@ -4,6 +4,7 @@ import json
 from importlib import import_module
 from pathlib import Path
 
+import pytest
 
 etymology = import_module("data.build.08_etymology")
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -76,23 +77,93 @@ def test_signal_b_pass_and_all_first_failure_reasons():
     cases = fixture_data()["may_nom_meaning_failure"]
     readings = {cases["han_string"]: {cases["reading"]}}
     assert etymology.reading_matches(cases["han_string"], cases["canonical_vi"], readings, {})
-    assert etymology.candidate_failure(True, True, 1, 1) is None
-    assert etymology.candidate_failure(False, True, 1, 1) == "reading"
-    assert etymology.candidate_failure(True, False, 0, 1) == "not_in_cedict"
-    assert etymology.candidate_failure(True, True, 0, 1) == cases["expected_failure"]
-    assert etymology.summarize_signal_b([]) == ("nonsino", "nonsino", "no_han_string")
-    assert etymology.summarize_signal_b([{"failure_reason": "reading", "reading_ok": False, "headword_found": True}]) == (
-        "nonsino", "nonsino", "reading",
+    assert etymology.evaluate_b_candidate(True, True, 1, 1, 1)["primary_pass"] is True
+    assert etymology.evaluate_b_candidate(False, True, 1, 1, 1)["failure_reason"] == "reading"
+    assert etymology.evaluate_b_candidate(True, False, 0, 1, 1)["failure_reason"] == "not_in_cedict"
+    assert etymology.evaluate_b_candidate(True, True, 0, 1, 1)["failure_reason"] == cases["expected_failure"]
+    assert etymology.summarize_signal_b([]) == ("nonsino", "nonsino", "nonsino", "no_han_string")
+    assert etymology.summarize_signal_b([{
+        **etymology.evaluate_b_candidate(False, True, 1, 1, 1), "reading_ok": False, "headword_found": True,
+    }]) == ("nonsino", "nonsino", "nonsino", "reading")
+    assert etymology.summarize_signal_b([{
+        **etymology.evaluate_b_candidate(True, False, 0, 1, 1), "reading_ok": True, "headword_found": False,
+    }]) == ("nonsino", "nonsino", "nonsino", "not_in_cedict")
+    assert etymology.summarize_signal_b([{
+        **etymology.evaluate_b_candidate(True, True, 0, 1, 1), "reading_ok": True, "headword_found": True,
+    }]) == ("nonsino", "nonsino", "sino", "meaning")
+    assert etymology.summarize_signal_b([{
+        **etymology.evaluate_b_candidate(True, True, 1, 1, 1), "reading_ok": True, "headword_found": True,
+    }]) == ("sino", "sino", "sino", None)
+
+
+def test_signal_b_monosyllable_requires_meaning_but_polysyllable_does_not():
+    mono = etymology.evaluate_b_candidate(True, True, 0, 1, 1)
+    assert mono == {
+        "primary_pass": False, "strict_pass": False, "relaxed_pass": True,
+        "failure_reason": "meaning",
+    }
+    multi = etymology.evaluate_b_candidate(True, True, 0, 1, 2)
+    assert multi == {
+        "primary_pass": True, "strict_pass": False, "relaxed_pass": True,
+        "failure_reason": None,
+    }
+
+
+def test_may_nom_case_still_fails_monosyllable_meaning_check():
+    case = fixture_data()["may_nom_meaning_failure"]
+    target = {case["canonical_vi"], "sew", "can", "might"}
+    cedict_gloss_lemmas = {"bury"}
+    overlap = etymology.max_content_lemma_overlap(target, [cedict_gloss_lemmas])
+    assert overlap == 0
+    result = etymology.evaluate_b_candidate(True, True, overlap, 1, 1)
+    assert result["primary_pass"] is False
+    assert result["failure_reason"] == "meaning"
+
+
+def test_vi_etym_sino_alternating_arguments_form_one_han_string():
+    entry = template_entry("vi-etym-sino", {"1": "良", "2": "good", "3": "心", "4": "heart"})
+    strings = etymology.extract_sino_template_strings(
+        [entry], fixture_data()["cjk_ranges"], 2, split_on="/", max_combinations=16,
     )
-    assert etymology.summarize_signal_b([{"failure_reason": "not_in_cedict", "reading_ok": True, "headword_found": False}]) == (
-        "nonsino", "nonsino", "not_in_cedict",
+    assert strings == ["良心"]
+
+
+def test_vi_etym_sino_slash_variants_form_a_bounded_product():
+    entry = template_entry("vi-etym-sino", {"1": "電/电", "2": "腦/脑"})
+    strings = etymology.extract_sino_template_strings(
+        [entry], fixture_data()["cjk_ranges"], 2, split_on="/", max_combinations=16,
     )
-    assert etymology.summarize_signal_b([{"failure_reason": "meaning", "reading_ok": True, "headword_found": True}]) == (
-        "nonsino", "sino", "meaning",
+    assert strings == sorted(["電腦", "電脑", "电腦", "电脑"])
+    capped = etymology.extract_sino_template_strings(
+        [entry], fixture_data()["cjk_ranges"], 2, split_on="/", max_combinations=2,
     )
-    assert etymology.summarize_signal_b([{"failure_reason": None, "reading_ok": True, "headword_found": True}]) == (
-        "sino", "sino", None,
-    )
+    assert len(capped) == 2
+
+
+def test_reading_fallback_records_wiktionary_char_source():
+    assert etymology.reading_match_source("埋", "mai", {}, {}, {"埋": {"mai"}}) == "wiktionary_char"
+    assert etymology.reading_match_source("埋", "mai", {"埋": {"mai"}}, {}, {"埋": {"mai"}}) == "unihan"
+
+
+def test_single_character_fallback_collects_han_viet_forms_and_head_templates():
+    entry = {
+        "word": "埋",
+        "pos": "character",
+        "forms": [{"form": "mai", "tags": ["romanization"]}],
+        "head_templates": [{"name": "head", "args": {"tr": "mai"}}],
+        "senses": [{"related": [{"word": "mai", "tags": ["han-viet-reading"]}]}],
+    }
+    assert etymology._single_character_readings(entry, fixture_data()["cjk_ranges"]) == {"mai"}
+
+
+def test_step08_wordnet_loader_is_local_and_reports_missing_corpus(tmp_path: Path):
+    original_path = list(etymology.nltk.data.path)
+    try:
+        with pytest.raises(RuntimeError, match="Run step 01 with --only wordnet"):
+            etymology.load_local_wordnet(tmp_path)
+        assert etymology.nltk.data.path == [str(tmp_path.resolve())]
+    finally:
+        etymology.nltk.data.path = original_path
 
 
 def test_stratum_mapping_table():
