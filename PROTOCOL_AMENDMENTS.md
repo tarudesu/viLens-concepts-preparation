@@ -96,3 +96,11 @@ v1.2 (2026-09-26; pre-data; no model outputs exist at the time of this amendment
   drops borrowings from European languages and Malay/Indonesian
   (bor/bor+/lbor/der/der+/obor templates); calques and Sinitic, Sino-Japanese
   and areal/proto-language derivations are retained.
+- §7.1 log_freq = Vietnamese Zipf frequency in the primary H3 model; a
+  pre-declared sensitivity run adds the readout language's own Zipf frequency
+  (e.g. Chinese for LA_zh). Matched-subsample check (§4.5): nearest-neighbour
+  matching without replacement, caliper 0.2 SD on the four §4.5 covariates
+  (Vietnamese frequency, syllables, concreteness, mean Vietnamese token count).
+  Reason: the pre-model data analysis found sino vs nonsino imbalance of
+  d = +0.89 (Vietnamese frequency), +0.83 (Chinese frequency), −0.83
+  (concreteness), −0.62 (Vietnamese tokens).
