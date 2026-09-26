@@ -1,6 +1,7 @@
 """Fixture-only tests for step-12 prompt rendering and masking."""
 
 from importlib import import_module
+import unicodedata
 
 import pytest
 
@@ -85,3 +86,49 @@ def test_cloze_demonstrations_use_seeded_selected_pool_across_sets() -> None:
         {"sentence": "Tôi uống ___.", "answer": "nước"},
         {"sentence": "Con ___ ngủ.", "answer": "mèo"},
     ]
+
+
+def test_nodiac_translation_strips_vietnamese_but_preserves_russian_and_case() -> None:
+    examples = [{"ru": "ёж", "vi": "Tiếng Việt"}, {"ru": "дом", "vi": "Đường phố"}]
+    diac = prompts.render_translation_prompt(
+        examples, ru_test="ёжик", vi_test="Cà phê", ru_label="Русский", vi_label="Tiếng Việt", k=2,
+    )
+    nodiac_examples = prompts.nodiac_translation_examples(examples)
+    nodiac = prompts.render_translation_prompt(
+        nodiac_examples, ru_test="ёжик", vi_test="Ca phe", ru_label="Русский", vi_label="Tieng Viet", k=2,
+    )
+    assert [line.split(" - ", 1)[0] for line in diac.splitlines() if line.startswith("Русский:")] == [
+        line.split(" - ", 1)[0] for line in nodiac.splitlines() if line.startswith("Русский:")
+    ]
+    assert nodiac == "Русский: ёж - Tieng Viet: Tieng Viet\nРусский: дом - Tieng Viet: Duong pho\nРусский: ёжик - Tieng Viet:"
+    targets = prompts.teacher_forcing_targets(
+        {"en_lemma": "coffee", "zh_canonical": "咖啡", "fr_canonical": "café", "id_canonical": "kopi"},
+        vi_text="Ca phe",
+    )
+    assert targets["target_vi"] == " Ca phe"
+    assert targets["target_en"] == " coffee" and targets["target_zh"] == " 咖啡"
+
+
+def test_nodiac_repetition_and_cloze_strip_all_vietnamese_prompt_text() -> None:
+    label = "Tieng Viet"
+    repetition_examples = prompts.nodiac_translation_examples([
+        {"ru": "", "vi": "Tôi yêu cà phê"}, {"ru": "", "vi": "Đường phố"},
+    ])
+    repetition = prompts.render_repetition_prompt(
+        [{"vi": item["vi"]} for item in repetition_examples], vi_test="Ca phe",
+        vi_label=label, k=2,
+    )
+    assert repetition == (
+        "Tieng Viet: Toi yeu ca phe - Tieng Viet: Toi yeu ca phe\n"
+        "Tieng Viet: Duong pho - Tieng Viet: Duong pho\n"
+        "Tieng Viet: Ca phe - Tieng Viet:"
+    )
+
+    examples, sentence, answer_label = prompts.nodiac_cloze_parts(
+        [{"sentence": "Tôi uống ___.", "answer": "Cà phê"}],
+        sentence="Đường phố rất đông.", answer_label="Đáp án:",
+    )
+    cloze = prompts.render_cloze_prompt(examples, sentence=sentence, answer_label=answer_label, k=1)
+    assert cloze == "Toi uong ___.\nDap an: Ca phe\nDuong pho rat dong.\nDap an:"
+    for prompt in (repetition, cloze):
+        assert not any(unicodedata.combining(char) for char in unicodedata.normalize("NFD", prompt))

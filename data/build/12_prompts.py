@@ -126,6 +126,29 @@ def render_cloze_prompt(
     return "\n".join(lines)
 
 
+def nodiac_translation_examples(examples: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Strip Vietnamese example forms while leaving Russian text byte-for-byte intact."""
+    return [{**item, "vi": strip_diacritics(item["vi"], preserve_case=True)} for item in examples]
+
+
+def nodiac_cloze_parts(
+    examples: list[dict[str, str]], *, sentence: str, answer_label: str,
+) -> tuple[list[dict[str, str]], str, str]:
+    """Strip Vietnamese marks from cloze demonstrations, target sentence, answers, and label."""
+    stripped_examples = [
+        {
+            "sentence": strip_diacritics(item["sentence"], preserve_case=True),
+            "answer": strip_diacritics(item["answer"], preserve_case=True),
+        }
+        for item in examples
+    ]
+    return (
+        stripped_examples,
+        strip_diacritics(sentence, preserve_case=True),
+        strip_diacritics(answer_label, preserve_case=True),
+    )
+
+
 def teacher_forcing_targets(row: dict[str, Any], *, vi_text: str) -> dict[str, str]:
     """Return all five study targets with the required leading-space token."""
     result = {
@@ -411,6 +434,9 @@ def run(config_path: str | Path) -> dict[str, Any]:
     if len(all_ids) != len(set(all_ids)):
         raise ValueError("Duplicate concept_id across main and M1 extension inputs")
     test_rows = [row for row in all_rows if row["split"] in settings["target_splits"]]
+    if any(type(row.get("m1_extension")) is not bool for row in test_rows):
+        raise ValueError("Step-11 test rows must have boolean m1_extension values")
+    main_test_rows = [row for row in test_rows if row["m1_extension"] is False]
     fewshot_pool = [row for row in concepts if row["split"] == "fewshot_reservoir"]
     _assert_no_test_fewshot_overlap(test_rows, fewshot_pool)
     if not test_rows:
@@ -566,18 +592,21 @@ def run(config_path: str | Path) -> dict[str, Any]:
     test_translation_rows = [row for row in test_rows if row["ru_canonical"] is not None]
     test_cloze_rows = [row for row in test_rows if masked_by_id[row["concept_id"]] is not None]
     test_cloze_nodiac_rows = [row for row in test_cloze_rows if row["collapsed"] is False]
+    main_cloze_rows = [row for row in main_test_rows if masked_by_id[row["concept_id"]] is not None]
 
     for set_number, fewshot_group in fewshot_sets.items():
         examples = [{"ru": row["ru_canonical"], "vi": row["vi_canonical"]} for row in fewshot_group]
         for condition in ("diac", "nodiac"):
+            vi_label = labels["vi"] if condition == "diac" else strip_diacritics(labels["vi"], preserve_case=True)
+            condition_examples = examples if condition == "diac" else nodiac_translation_examples(examples)
             records: list[dict[str, Any]] = []
             for row in test_rows:
                 if condition == "nodiac" and row["collapsed"]:
                     continue
-                vi_text = row["vi_canonical"] if condition == "diac" else strip_diacritics(row["vi_canonical"])
+                vi_text = row["vi_canonical"] if condition == "diac" else strip_diacritics(row["vi_canonical"], preserve_case=True)
                 prompt = render_repetition_prompt(
-                    [{"vi": item["vi"]} for item in examples], vi_test=vi_text,
-                    vi_label=labels["vi"], k=repetition_k,
+                    [{"vi": item["vi"]} for item in condition_examples], vi_test=vi_text,
+                    vi_label=vi_label, k=repetition_k,
                 )
                 records.append(_prompt_record(row, prompt=prompt, format_name="repetition", condition=condition,
                                               fewshot_set=set_number, vi_target=vi_text))
@@ -589,10 +618,10 @@ def run(config_path: str | Path) -> dict[str, Any]:
             for row in test_translation_rows:
                 if condition == "nodiac" and row["collapsed"]:
                     continue
-                vi_text = row["vi_canonical"] if condition == "diac" else strip_diacritics(row["vi_canonical"])
+                vi_text = row["vi_canonical"] if condition == "diac" else strip_diacritics(row["vi_canonical"], preserve_case=True)
                 prompt = render_translation_prompt(
-                    examples, ru_test=row["ru_canonical"], vi_test=vi_text,
-                    ru_label=labels["ru"], vi_label=labels["vi"], k=translation_k,
+                    condition_examples, ru_test=row["ru_canonical"], vi_test=vi_text,
+                    ru_label=labels["ru"], vi_label=vi_label, k=translation_k,
                 )
                 translation_records.append(_prompt_record(row, prompt=prompt, format_name="translation", condition=condition,
                                                           fewshot_set=set_number, vi_target=vi_text))
@@ -607,8 +636,16 @@ def run(config_path: str | Path) -> dict[str, Any]:
             sentence = mask_canonical_occurrence(masked_by_id[row["concept_id"]], row["vi_canonical"])
             if sentence is None:
                 raise AssertionError(f"Cached cloze sentence no longer contains {row['concept_id']!r}")
-            vi_text = row["vi_canonical"] if condition == "diac" else strip_diacritics(row["vi_canonical"])
-            prompt = render_cloze_prompt(fewshot_cloze, sentence=sentence, answer_label=answer_label, k=cloze_k)
+            vi_text = row["vi_canonical"] if condition == "diac" else strip_diacritics(row["vi_canonical"], preserve_case=True)
+            if condition == "nodiac":
+                examples_for_prompt, sentence, answer_label_for_prompt = nodiac_cloze_parts(
+                    fewshot_cloze, sentence=sentence, answer_label=answer_label,
+                )
+            else:
+                examples_for_prompt, answer_label_for_prompt = fewshot_cloze, answer_label
+            prompt = render_cloze_prompt(
+                examples_for_prompt, sentence=sentence, answer_label=answer_label_for_prompt, k=cloze_k,
+            )
             records.append(_prompt_record(row, prompt=prompt, format_name="cloze", condition=condition,
                                           fewshot_set=primary_set, vi_target=vi_text))
         file_rows[f"cloze_{condition}_set{primary_set}.jsonl"] = records
@@ -633,14 +670,21 @@ def run(config_path: str | Path) -> dict[str, Any]:
     logger.info("Few-shot selection balancing counts: %s", json.dumps(
         {f"{pos}/{stratum}": count for (pos, stratum), count in sorted(balance_counts.items())}, sort_keys=True,
     ))
-    stratum_counts = Counter(row["stratum"] for row in test_rows)
-    cloze_counts = Counter(row["stratum"] for row in test_cloze_rows)
-    logger.info("TEST cloze coverage by stratum:")
-    for stratum in sorted(stratum_counts):
-        logger.info("%s | %d/%d (%.6f)", stratum, cloze_counts[stratum], stratum_counts[stratum], cloze_counts[stratum] / stratum_counts[stratum])
+    main_stratum_counts = Counter(row["stratum"] for row in main_test_rows)
+    main_cloze_counts = Counter(row["stratum"] for row in main_cloze_rows)
+    logger.info("MAIN TEST cloze coverage by stratum:")
+    for stratum in sorted(main_stratum_counts):
+        logger.info("%s | %d/%d (%.6f)", stratum, main_cloze_counts[stratum], main_stratum_counts[stratum], main_cloze_counts[stratum] / main_stratum_counts[stratum])
     threshold = int(settings["cloze"]["min_test_concepts_primary"])
-    cloze_role = "primary" if len(test_cloze_rows) >= threshold else "supplementary"
-    logger.info("Cloze coverage=%d TEST concepts; threshold=%d; role=%s", len(test_cloze_rows), threshold, cloze_role)
+    cloze_role = "primary" if len(main_cloze_rows) >= threshold else "supplementary"
+    configured_cloze_role = settings["cloze"].get("cloze_status")
+    if configured_cloze_role != cloze_role:
+        raise ValueError(
+            "Configured prompts.cloze.cloze_status does not match the main-test result: "
+            f"configured={configured_cloze_role!r}, computed={cloze_role!r}"
+        )
+    logger.info("Cloze coverage all TEST=%d; MAIN TEST=%d/%d; threshold=%d; cloze_status=%s",
+                len(test_cloze_rows), len(main_cloze_rows), len(main_test_rows), threshold, cloze_role)
     logger.info("NLLB Russian calls=%d; cache hits=%d", translator.translation_calls, translator.cache_hits)
 
     flow_path = Path(config["paths"]["dropflow"])
@@ -649,6 +693,7 @@ def run(config_path: str | Path) -> dict[str, Any]:
     flow_stages = [
         ("translation_ru_available_test", len(test_rows), len(test_translation_rows), test_translation_rows),
         ("cloze_sentence_available_test", len(test_rows), len(test_cloze_rows), test_cloze_rows),
+        ("cloze_sentence_available_main_test", len(main_test_rows), len(main_cloze_rows), main_cloze_rows),
         ("cloze_nodiac_noncollapsed_test", len(test_cloze_rows), len(test_cloze_nodiac_rows), test_cloze_nodiac_rows),
     ]
     for stage, n_in, n_out, rows in flow_stages:
@@ -662,7 +707,8 @@ def run(config_path: str | Path) -> dict[str, Any]:
     return {"ru_coverage_test": (len(test_candidate_rows), len(test_rows)),
             "ru_agreement_test": (len(test_ru_agree_rows), len(test_candidate_rows)),
             "fewshot": selected, "file_counts": {name: len(rows) for name, rows in file_rows.items()},
-            "cloze_test_n": len(test_cloze_rows), "cloze_role": cloze_role, "runtime_seconds": runtime}
+            "cloze_test_n": len(test_cloze_rows), "cloze_main_test_n": len(main_cloze_rows),
+            "cloze_role": cloze_role, "runtime_seconds": runtime}
 
 
 def main() -> None:

@@ -41,6 +41,8 @@ def test_russian_stress_removal_and_matching() -> None:
 
 def test_strip_diacritics_including_vietnamese_d() -> None:
     assert strip_diacritics("Đường phố") == "duong pho"
+    assert strip_diacritics("Tiếng Việt", preserve_case=True) == "Tieng Viet"
+    assert strip_diacritics("ĐỨNG", preserve_case=True) == "DUNG"
 
 
 def test_release_guard_rejects_pending_concreteness() -> None:

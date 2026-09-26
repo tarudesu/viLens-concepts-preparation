@@ -277,6 +277,7 @@ prompts:
   cloze:
     k: 3
     min_test_concepts_primary: 300
+    cloze_status: supplementary # Computed on main-test concepts only.
     answer_label: "Đáp án:"
     max_syllables: 25
   fewshot:

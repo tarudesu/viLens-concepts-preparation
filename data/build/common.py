@@ -114,14 +114,15 @@ def vi_orth_key(value: str) -> str:
     return " ".join(modern_syllables)
 
 
-def strip_diacritics(value: str) -> str:
-    """Remove combining marks and Vietnamese đ/Đ from a string."""
+def strip_diacritics(value: str, *, preserve_case: bool = False) -> str:
+    """Remove combining marks and Vietnamese đ/Đ; optionally preserve letter case."""
 
     if not isinstance(value, str):
         raise TypeError(f"strip_diacritics expects str, got {type(value).__name__}")
     decomposed = unicodedata.normalize("NFD", normalize_nfc(value))
     stripped = "".join(char for char in decomposed if not unicodedata.combining(char))
-    return stripped.replace("đ", "d").replace("Đ", "D").lower()
+    stripped = stripped.replace("đ", "d").replace("Đ", "D")
+    return stripped if preserve_case else stripped.lower()
 
 
 def contextual_tokenization(tokenizer: Any, prefix: str, word: str) -> tuple[int, list[str]]:
