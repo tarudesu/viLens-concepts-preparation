@@ -470,7 +470,7 @@ def _assert_no_test_fewshot_overlap(target_rows: list[dict[str, Any]], fewshot_r
         raise AssertionError(f"TEST concepts occur among few-shot examples: {leaked[:10]!r}")
 
 
-def run(config_path: str | Path) -> dict[str, Any]:
+def run(config_path: str | Path, *, cloze_only: bool = False) -> dict[str, Any]:
     """Collect RU translations, select fixed demonstrations, and write test prompts."""
     started = time.monotonic()
     config = load_config(config_path)
@@ -635,6 +635,8 @@ def run(config_path: str | Path) -> dict[str, Any]:
         )
     step08 = _load_step_module("08_etymology.py")
     step04 = _load_step_module("04_attest.py")
+    translator.max_new_tokens = int(cloze_v13_settings["nllb_max_new_tokens"])
+    logger.info("Cloze C7 NLLB max_new_tokens=%d", translator.max_new_tokens)
     cloze_result = build_cloze_v13(
         all_rows=all_rows,
         test_rows=test_rows,
@@ -651,28 +653,42 @@ def run(config_path: str | Path) -> dict[str, Any]:
     test_cloze_nodiac_rows = cloze_result["test_nodiac_rows"]
     main_cloze_rows = [row for row in main_test_rows if masked_by_id.get(row["concept_id"]) is not None]
     demo_concept_ids = cloze_result["demo_concept_ids"]
-    minimum_main_survivors = int(cloze_v13_settings["minimum_main_survivors_to_write"])
-    if cloze_result["stop_reason"] or cloze_result["main_survivors"] < minimum_main_survivors:
+    if cloze_result["stop_reason"]:
         if cloze_result["stop_reason"]:
             logger.error(
-                "Cloze v1.3 cannot render prompts: selected %d/%d demonstrations after set-2 fallback; "
-                "leaving prompt files untouched",
+                "Cloze v1.3 cannot render prompts: stop_reason=%s; selected %d/%d demonstrations; leaving prompt files untouched",
+                cloze_result["stop_reason"],
                 cloze_result["report"]["demo_count_available"], cloze_result["report"]["demo_count_required"],
-            )
-        if cloze_result["main_survivors"] < minimum_main_survivors:
-            logger.error(
-                "Cloze v1.3 decision point: main survivors=%d below configured minimum=%d; "
-                "leaving prompt files untouched and stopping for human decision",
-                cloze_result["main_survivors"], minimum_main_survivors,
             )
         runtime = time.monotonic() - started
         logger.info("Runtime seconds: %.3f", runtime)
         return {
-            "status": cloze_result["stop_reason"] or "below_minimum_main_survivors",
+            "status": cloze_result["stop_reason"],
             "main_survivors": cloze_result["main_survivors"],
-            "minimum_main_survivors": minimum_main_survivors,
             "demos_available": cloze_result["report"]["demo_count_available"],
             "demos_required": cloze_result["report"]["demo_count_required"],
+            "cloze_report_path": cloze_v13_settings["paths"]["audit_report"],
+            "runtime_seconds": runtime,
+        }
+
+    cloze_output_dir = Path(cloze_v13_settings["paths"]["output_dir"])
+    if cloze_only:
+        cloze_output_dir.mkdir(parents=True, exist_ok=True)
+        for condition in ("diac", "nodiac"):
+            filename = f"cloze_{condition}_set{int(fewshot_settings['primary_set'])}.jsonl"
+            _atomic_write_jsonl(cloze_result["records"][condition], cloze_output_dir / filename)
+            logger.info("Prompt output %s | records=%d", cloze_output_dir / filename, len(cloze_result["records"][condition]))
+        runtime = time.monotonic() - started
+        logger.info("Cloze-only build completed without rewriting other prompt or data outputs")
+        logger.info("Runtime seconds: %.3f", runtime)
+        return {
+            "status": "complete",
+            "main_survivors": cloze_result["main_survivors"],
+            "extension_survivors": cloze_result["report"]["final_counts"]["extension"],
+            "file_counts": {
+                f"cloze_{condition}_set{int(fewshot_settings['primary_set'])}.jsonl": len(cloze_result["records"][condition])
+                for condition in ("diac", "nodiac")
+            },
             "cloze_report_path": cloze_v13_settings["paths"]["audit_report"],
             "runtime_seconds": runtime,
         }
@@ -737,8 +753,9 @@ def run(config_path: str | Path) -> dict[str, Any]:
     ru_table = pa.Table.from_pylist(ru_rows, schema=ru_schema)
     _atomic_write_parquet(ru_table, paths["ru_output"], row_group_size)
     for filename, records in sorted(file_rows.items()):
-        _atomic_write_jsonl(records, output_dir / filename)
-        logger.info("Prompt output %s | records=%d", output_dir / filename, len(records))
+        destination_dir = cloze_output_dir if filename.startswith("cloze_") else output_dir
+        _atomic_write_jsonl(records, destination_dir / filename)
+        logger.info("Prompt output %s | records=%d", destination_dir / filename, len(records))
 
     logger.info("Rendered prompt examples (first deterministic TEST row per format/condition):")
     for key in sorted(sample_prompts):
@@ -800,9 +817,10 @@ def run(config_path: str | Path) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="configs/data.yaml")
+    parser.add_argument("--cloze-only", action="store_true", help="Rebuild cloze files without rewriting other prompt/data outputs")
     args = parser.parse_args()
     try:
-        run(args.config)
+        run(args.config, cloze_only=args.cloze_only)
     except Exception as exc:
         logger = logging.getLogger(STEP)
         if logger.handlers:

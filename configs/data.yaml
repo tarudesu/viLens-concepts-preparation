@@ -354,16 +354,18 @@ prompts:
     max_canonical_occurrences: 1
     demo_count: 3
     preferred_demo_vi: ["nghiên cứu", "bạo lực"]
-    fallback_fewshot_set: 2
-    minimum_main_survivors_to_write: 100
+    maximum_main_survivors: 61 # Stop if the stricter rebuild exceeds the prior audit upper bound.
+    maximum_extension_survivors: 5 # Stop if the stricter rebuild exceeds the prior audit upper bound.
+    nllb_max_new_tokens: 256 # C7 flags and excludes every beam that consumes this full budget.
     forbidden_characters: ["(", ")", "[", "]", "/", "|", "~"]
-    semantic_use_all_returned_beams: true
+    semantic_use_all_returned_beams: false # C7 uses the top beam only; outputs that hit the token limit never count.
     spacy_batch_size: 128
     survivor_sample_n: 25
     paths:
       dropped_csv: data/interim/dropped_cloze.csv
       candidate_failures: data/interim/cloze_candidate_failures.jsonl
       audit_report: data/interim/cloze_v13_report.json
+      output_dir: data/prompts/v1.3
   fewshot:
     n_final: 30
     n_sets: 6

@@ -21,11 +21,75 @@ except ModuleNotFoundError:
 
 RULES = ("C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8")
 FORBIDDEN = frozenset("()[]/|~")
+LEGACY_SAMPLE_ITEMS = (
+    ("#4", "chỉ", "point"),
+    ("#8", "hôm qua", "yesterday"),
+    ("#12", "hội đồng", "council"),
+    ("#14", "núi lửa", "volcano"),
+    ("#15", "trinh nữ", "virgin"),
+    ("#16", "phương pháp", "method"),
+    ("#19", "tượng đài", "monument"),
+    ("#22", "hội chứng", "syndrome"),
+)
 
 
 def clean_example_text(value: str) -> str:
     """Normalize NFC and collapse whitespace to one line with single spaces."""
     return " ".join(normalize_nfc(value).split())
+
+
+def is_single_line_raw_example(value: str) -> bool:
+    """Reject source examples containing a physical line break before cleanup."""
+    return "\n" not in value and "\r" not in value
+
+
+def count_query_tokens(query: str) -> int:
+    """Count letter-bearing whitespace tokens plus the single blank marker."""
+    return sum(
+        "___" in token or any(unicodedata.category(char).startswith("L") for char in token)
+        for token in query.split()
+    )
+
+
+def _syllable_key(token: str) -> str:
+    """Normalize a single Vietnamese syllable with the project's orthographic key."""
+    return vi_orth_key(token.strip())
+
+
+def vietnamese_syllables(headwords: set[str]) -> set[str]:
+    """Return all whitespace/hyphen-delimited syllables attested in VI headwords."""
+    syllables: set[str] = set()
+    for headword in headwords:
+        for token in re.split(r"[\s-]+", headword):
+            core, _, _ = _punctuation_edges(token)
+            if core:
+                syllables.add(_syllable_key(core))
+    return syllables
+
+
+def c5b_unknown_tokens(query: str, syllables: set[str]) -> list[str]:
+    """Return letter-bearing query tokens absent from VI Wiktextract syllables."""
+    unknown: list[str] = []
+    for raw_token in re.split(r"[\s-]+", query):
+        if "___" in raw_token:
+            raw_token = raw_token.replace("___", "")
+        token, _, _ = _punctuation_edges(raw_token)
+        if not token or not any(unicodedata.category(char).startswith("L") for char in token):
+            continue
+        if _syllable_key(token) not in syllables:
+            unknown.append(token)
+    return unknown
+
+
+def query_token_syllables(query: str, canonical: str) -> list[str]:
+    """Fill the blank and return case-folded query syllables split on spaces/hyphens."""
+    filled = query.replace("___", canonical)
+    result: list[str] = []
+    for raw_token in re.split(r"[\s-]+", filled):
+        core, _, _ = _punctuation_edges(raw_token)
+        if core:
+            result.append(_syllable_key(core))
+    return result
 
 
 def _punctuation_edges(token: str) -> tuple[str, int, int]:
@@ -78,38 +142,38 @@ def mask_exactly_once(
 
 
 def compound_headword_conflict(query: str, canonical: str, headwords: set[str]) -> str | None:
-    """Return an adjacent-syllable Wiktextract headword that conflicts with the blank."""
-    tokens = list(re.finditer(r"\S+", query))
-    blank_index: int | None = None
-    cores = [_punctuation_edges(match.group(0))[0] for match in tokens]
-    for index, core in enumerate(cores):
-        raw_token = tokens[index].group(0)
-        if raw_token.count("___") == 1:
-            blank_start = raw_token.index("___")
-            prefix = raw_token[:blank_start]
-            suffix = raw_token[blank_start + 3:]
-            if not all(unicodedata.category(char).startswith("P") for char in prefix + suffix):
-                continue
-            if blank_index is not None:
-                raise ValueError("Compound check requires a query with exactly one blank")
-            blank_index = index
-    if blank_index is None:
-        raise ValueError("Compound check could not locate the cloze blank")
+    """Return a headword window containing the filled target and a neighbor syllable."""
+    if query.count("___") != 1:
+        raise ValueError("Compound check requires a query with exactly one blank")
+    syllables = query_token_syllables(query, canonical)
+    target = [_syllable_key(item) for item in canonical.split()]
+    target_start = None
+    for index in range(len(syllables) - len(target) + 1):
+        if syllables[index:index + len(target)] == target:
+            target_start = index
+            break
+    if target_start is None:
+        raise ValueError("Compound check could not locate the filled canonical form")
 
-    left = cores[blank_index - 1] if blank_index > 0 else ""
-    right = cores[blank_index + 1] if blank_index + 1 < len(cores) else ""
-    target_key = vi_orth_key(canonical)
-    combinations: list[str] = []
-    if left:
-        combinations.append(f"{left} {canonical}")
-    if right:
-        combinations.append(f"{canonical} {right}")
-    if left and right:
-        combinations.append(f"{left} {canonical} {right}")
-    for combined in combinations:
-        key = vi_orth_key(combined)
-        if key != target_key and key in headwords:
-            return normalize_nfc(combined)
+    headwords_by_length: dict[int, set[tuple[str, ...]]] = defaultdict(set)
+    for headword in headwords:
+        parts = tuple(
+            _syllable_key(core)
+            for item in re.split(r"[\s-]+", headword)
+            for core, _, _ in [_punctuation_edges(item)]
+            if core
+        )
+        if len(parts) > len(target):
+            headwords_by_length[len(parts)].add(parts)
+
+    target_end = target_start + len(target)
+    for window_size in sorted(headwords_by_length):
+        for start in range(max(0, target_end - window_size), min(target_start, len(syllables) - window_size) + 1):
+            end = start + window_size
+            if start <= target_start and end >= target_end:
+                window = tuple(syllables[start:end])
+                if window in headwords_by_length[window_size]:
+                    return normalize_nfc(" ".join(window))
     return None
 
 
@@ -241,7 +305,18 @@ def collect_example_candidates(
                         "sense_index": sense_index,
                         "example_index": example_index,
                         "example_text": text if text is not None else "",
-                        "c1_allowed": (entry_index, sense_index) in allowed_senses,
+                        "c1_allowed": (
+                            (entry_index, sense_index) in allowed_senses
+                            and "ref" not in example
+                            and example.get("type") != "quotation"
+                            and isinstance(text, str)
+                        ),
+                        "c1_reason": (
+                            "example has a ref field" if "ref" in example
+                            else "example type is quotation" if example.get("type") == "quotation"
+                            else "example has no text field" if not isinstance(text, str)
+                            else "no English-gloss-matched sense; entry is not single-sense"
+                        ),
                     })
         empty_concepts[concept_id] = len(candidates) - before_count
     return candidates, empty_concepts
@@ -262,6 +337,9 @@ def _failure(candidate: dict[str, Any], rule: str, reason: str) -> dict[str, Any
         "failed_rule": rule,
         "reason": reason,
         "nllb_english": candidate.get("nllb_english", []),
+        "nllb_limit_hits": candidate.get("nllb_limit_hits", []),
+        "c7_match_type": candidate.get("c7_match_type"),
+        "c7_match_word": candidate.get("c7_match_word"),
     }
 
 
@@ -274,6 +352,123 @@ def _scope_name(candidate: dict[str, Any]) -> str:
 
 def _stage_counts(candidates: list[dict[str, Any]]) -> dict[str, int]:
     return dict(Counter(_scope_name(candidate) for candidate in candidates))
+
+
+def english_match_targets(
+    english: str,
+    *,
+    pos: str,
+    nlp: Any,
+    wordnet_reader: Any,
+) -> list[dict[str, Any]]:
+    """Build the only permitted C7 targets: exact, two-word head, and same-POS WordNet."""
+    doc = nlp(english)
+    target_words = lemma_tokens(doc)
+    if not target_words:
+        raise ValueError(f"spaCy produced no English lemmas for target {english!r}")
+    targets: list[dict[str, Any]] = [{
+        "type": "target_lemma", "word": english, "sequence": target_words,
+    }]
+    if len(target_words) == 2:
+        lexical = [token for token in doc if not token.is_space and not token.is_punct]
+        roots = [token for token in lexical if token.head == token]
+        head = roots[-1] if roots else lexical[-1]
+        targets.append({
+            "type": "two_word_head_lemma",
+            "word": normalize_nfc(head.lemma_),
+            "sequence": (normalize_nfc(head.lemma_).casefold(),),
+        })
+
+    wordnet_pos = {"noun": "n", "verb": "v", "adj": "a"}.get(pos)
+    if wordnet_pos is None:
+        raise ValueError(f"Unsupported POS for same-POS WordNet matching: {pos!r}")
+    phrase_key = normalize_nfc(english).replace(" ", "_")
+    for synset in wordnet_reader.synsets(phrase_key, pos=wordnet_pos):
+        for lemma in synset.lemmas():
+            word = normalize_nfc(lemma.name().replace("_", " "))
+            sequence = lemma_tokens(nlp(word))
+            if sequence:
+                targets.append({"type": "wordnet_synset_lemma", "word": word, "sequence": sequence})
+
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[str, tuple[str, ...]]] = set()
+    for target in targets:
+        key = (target["type"], target["sequence"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(target)
+    return unique
+
+
+def match_c7_output(output_lemmas: tuple[str, ...], targets: list[dict[str, Any]]) -> dict[str, str] | None:
+    """Return the first allowed exact C7 match and its auditable type/word."""
+    for target in targets:
+        if contains_lemma_sequence(output_lemmas, target["sequence"]):
+            return {"type": target["type"], "word": target["word"]}
+    return None
+
+
+def match_untruncated_c7_beams(
+    output_lemmas: list[tuple[str, ...]], limit_hits: list[bool], targets: list[dict[str, Any]],
+) -> dict[str, str] | None:
+    """Match only outputs that did not consume the full NLLB generation budget."""
+    if len(output_lemmas) != len(limit_hits):
+        raise ValueError("C7 output lemmas and token-limit flags must have equal lengths")
+    for lemmas, reached_limit in zip(output_lemmas, limit_hits, strict=True):
+        if reached_limit:
+            continue
+        match = match_c7_output(lemmas, targets)
+        if match is not None:
+            return match
+    return None
+
+
+def recheck_point_sample(
+    candidates: list[dict[str, Any]],
+    *,
+    translator: Any,
+    nlp: Any,
+    wordnet_reader: Any,
+    source_code: str,
+    target_code: str,
+    use_all_returned_beams: bool,
+) -> dict[str, Any]:
+    """Independently re-evaluate the legacy #4 point example under C7's output rule."""
+    matches = [candidate for candidate in candidates if candidate["vi"] == "chỉ" and candidate["en"] == "point"]
+    if len(matches) != 1:
+        raise ValueError(f"Expected one legacy point example for C7 diagnostic; found {len(matches)}")
+    candidate = matches[0]
+    raw = candidate["example_text"]
+    if not is_single_line_raw_example(raw):
+        return {"status": "not_rechecked_raw_multiline", "concept_id": candidate["concept_id"]}
+    text = clean_example_text(raw)
+    occurrences = exact_occurrences(text, candidate["vi"])
+    if len(occurrences) != 1:
+        return {
+            "status": "not_rechecked_target_occurrence_count",
+            "concept_id": candidate["concept_id"],
+            "occurrences": len(occurrences),
+        }
+    start, end = occurrences[0]
+    filled = text[:start] + candidate["vi"] + text[end:]
+    request = (source_code, target_code, filled)
+    details = translator.translate_many_with_limit_hits([request])[request]
+    output_lemmas = [lemma_tokens(doc) for doc in nlp.pipe(details["outputs"], batch_size=32)]
+    targets = english_match_targets("point", pos=candidate["pos"], nlp=nlp, wordnet_reader=wordnet_reader)
+    beam_count = len(details["outputs"]) if use_all_returned_beams else min(1, len(details["outputs"]))
+    match = match_untruncated_c7_beams(
+        output_lemmas[:beam_count], details["limit_hits"][:beam_count], targets,
+    )
+    return {
+        "status": "evaluated",
+        "concept_id": candidate["concept_id"],
+        "NLLB English": details["outputs"],
+        "NLLB limit hits": details["limit_hits"],
+        "evaluated_beam_count": beam_count,
+        "C7 matched type": match["type"] if match else None,
+        "C7 matched word": match["word"] if match else None,
+        "passes_C7_only_if_contains_point": match is not None and match["word"].casefold() == "point",
+    }
 
 
 def filter_cloze_candidates_c1_to_c7(
@@ -324,12 +519,15 @@ def filter_cloze_candidates_c1_to_c7(
             per_concept[candidate["concept_id"]][f"after_{rule}"] = per_concept[candidate["concept_id"]].get(f"after_{rule}", 0) + 1
             pos_counts[f"after_{rule}"][_scope_name(candidate)][candidate["pos"]] += 1
 
-    apply_rule("C1", lambda candidate: (bool(candidate["c1_allowed"]), "no English-gloss-matched sense; entry is not single-sense"))
+    apply_rule("C1", lambda candidate: (bool(candidate["c1_allowed"]), candidate.get("c1_reason", "example source is not eligible")))
 
     def c2(candidate: dict[str, Any]) -> tuple[bool, str]:
+        raw = candidate["example_text"]
+        if not is_single_line_raw_example(raw):
+            return False, "raw source example contains a newline or carriage return"
         cleaned = clean_example_text(candidate["example_text"])
         candidate["clean_text"] = cleaned
-        return bool(cleaned) and "\n" not in cleaned and "\r" not in cleaned, "empty or non-single-line example after whitespace cleanup"
+        return bool(cleaned), "empty example after whitespace cleanup"
 
     apply_rule("C2", c2)
 
@@ -349,16 +547,21 @@ def filter_cloze_candidates_c1_to_c7(
     apply_rule("C3", c3)
 
     def c4(candidate: dict[str, Any]) -> tuple[bool, str]:
-        candidate["token_count"] = len(candidate["query"].split())
-        return candidate["token_count"] >= min_query_tokens, f"query has {candidate['token_count']} whitespace tokens; minimum is {min_query_tokens}"
+        candidate["token_count"] = count_query_tokens(candidate["query"])
+        return candidate["token_count"] >= min_query_tokens, f"query has {candidate['token_count']} letter-bearing tokens including blank; minimum is {min_query_tokens}"
 
     apply_rule("C4", c4)
 
     forbidden = frozenset(forbidden_characters)
+    vi_syllables = vietnamese_syllables(headwords)
 
     def c5(candidate: dict[str, Any]) -> tuple[bool, str]:
         found = sorted(set(candidate["clean_text"]).intersection(forbidden))
-        return not found, f"query contains forbidden character(s): {''.join(found)}"
+        if found:
+            return False, f"query contains forbidden character(s): {''.join(found)}"
+        unknown = c5b_unknown_tokens(candidate["query"], vi_syllables)
+        candidate["c5b_unknown_tokens"] = unknown
+        return not unknown, f"query contains token(s) absent from Vietnamese Wiktextract syllables: {', '.join(unknown)}" if unknown else ""
 
     apply_rule("C5", c5)
 
@@ -370,36 +573,23 @@ def filter_cloze_candidates_c1_to_c7(
     apply_rule("C6", c6)
 
     english_requests = [(source_code, target_code, candidate["filled_sentence"]) for candidate in current]
-    translations = translator.translate_many(english_requests) if english_requests else {}
+    detailed_translations = translator.translate_many_with_limit_hits(english_requests) if english_requests else {}
     request_key_by_candidate = {
         candidate["candidate_id"]: (source_code, target_code, normalize_nfc(candidate["filled_sentence"]))
         for candidate in current
     }
     output_texts = sorted({
         output
-        for values in translations.values()
-        for output in values
+        for detail in detailed_translations.values()
+        for output in detail["outputs"]
     })
 
-    english_by_target: dict[str, set[tuple[str, ...]]] = {}
-    for english in sorted({candidate["en"] for candidate in current}):
-        target_doc = nlp(english)
-        target_words = lemma_tokens(target_doc)
-        if not target_words:
-            raise ValueError(f"spaCy produced no English lemmas for target {english!r}")
-        terms = {english, *step08.wordnet_synonyms(wordnet_reader, english)}
-        target_sequences: set[tuple[str, ...]] = set()
-        for term in terms:
-            term_doc = nlp(term)
-            term_words = lemma_tokens(term_doc)
-            if term_words:
-                target_sequences.add(term_words)
-        if len(target_words) == 2:
-            lexical = [token for token in target_doc if not token.is_space and not token.is_punct]
-            roots = [token for token in lexical if token.head == token]
-            head = roots[-1] if roots else lexical[-1]
-            target_sequences.add((normalize_nfc(head.lemma_).casefold(),))
-        english_by_target[english] = target_sequences
+    targets_by_candidate = {
+        candidate["candidate_id"]: english_match_targets(
+            candidate["en"], pos=candidate["pos"], nlp=nlp, wordnet_reader=wordnet_reader,
+        )
+        for candidate in current
+    }
 
     # Batch parse translations for throughput while retaining the same spaCy lemmas per text.
     output_lemmas: dict[str, tuple[str, ...]] = {}
@@ -411,18 +601,30 @@ def filter_cloze_candidates_c1_to_c7(
     semantic_survivors: list[dict[str, Any]] = []
     for candidate in current:
         key = request_key_by_candidate[candidate["candidate_id"]]
-        outputs = translations[key]
+        detail = detailed_translations[key]
+        outputs = detail["outputs"]
+        limit_hits = detail["limit_hits"]
         candidate["nllb_english"] = outputs
-        beam_outputs = outputs if use_all_returned_beams else outputs[:1]
-        matched = any(
-            contains_lemma_sequence(output_lemmas[output], phrase)
-            for output in beam_outputs
-            for phrase in english_by_target[candidate["en"]]
+        candidate["nllb_limit_hits"] = limit_hits
+        beam_indexes = range(len(outputs)) if use_all_returned_beams else range(min(1, len(outputs)))
+        selected_lemmas = [output_lemmas[outputs[index]] for index in beam_indexes]
+        selected_limit_hits = [limit_hits[index] for index in beam_indexes]
+        matched = match_untruncated_c7_beams(
+            selected_lemmas, selected_limit_hits, targets_by_candidate[candidate["candidate_id"]],
         )
-        if matched:
+        if matched is not None:
+            candidate["c7_match_type"] = matched["type"]
+            candidate["c7_match_word"] = matched["word"]
             semantic_survivors.append(candidate)
         else:
-            failures.append(_failure(candidate, "C7", "no configured NLLB beam contains the English lemma, two-word head lemma, or WordNet synonym"))
+            candidate["c7_match_type"] = None
+            candidate["c7_match_word"] = None
+            untruncated = sum(not value for value in limit_hits)
+            failures.append(_failure(
+                candidate, "C7",
+                "no untruncated configured NLLB beam contains the exact English lemma, two-word head lemma, or same-POS WordNet synset lemma "
+                f"(untruncated beams={untruncated}; token-limit hits={sum(limit_hits)})",
+            ))
     current = semantic_survivors
     counts["after_C7"] = _stage_counts(current)
     pos_counts["after_C7"] = defaultdict(Counter)
@@ -454,58 +656,89 @@ def select_demo_concept_ids(
     *,
     candidate_rows: list[dict[str, Any]],
     fewshot_sets: dict[int, list[dict[str, Any]]],
+    directions_rows: list[dict[str, Any]],
     preferred_vi: list[str],
     demo_count: int,
-    fallback_set: int,
-    seed: int,
+    preferred_min_tokens: int,
     test_rows: list[dict[str, Any]],
-) -> list[str]:
-    """Select distinct passing demonstrations, preferring set 1 and seeded set 2 fallback."""
-    c1_c7_ids = {candidate["concept_id"] for candidate in candidate_rows}
+) -> list[dict[str, Any]]:
+    """Choose noncollapsed passing demos by set tier, then directions, balancing POS."""
     test_ids = {row["concept_id"] for row in test_rows}
     target_candidates = [candidate for candidate in candidate_rows if candidate["concept_id"] in test_ids]
     target_owners = query_owner_map(target_candidates)
-
-    first_set = fewshot_sets.get(1, [])
-    preferred_ids: list[str] = []
-    for preferred_form in preferred_vi:
-        for row in first_set:
-            if normalize_nfc(row["vi_canonical"]).casefold() == normalize_nfc(preferred_form).casefold():
-                if row["concept_id"] in c1_c7_ids and row["concept_id"] not in preferred_ids:
-                    preferred_ids.append(row["concept_id"])
-    set1_ids = preferred_ids + [
-        row["concept_id"] for row in first_set
-        if row["concept_id"] in c1_c7_ids and row["concept_id"] not in preferred_ids
-    ]
-
-    fallback_rows = fewshot_sets.get(fallback_set, [])
-    sorted_fallback = sorted(fallback_rows, key=lambda row: row["concept_id"])
-    rng = np.random.default_rng(seed)
-    fallback_ids = [sorted_fallback[index]["concept_id"] for index in rng.permutation(len(sorted_fallback)).tolist()]
-    fallback_ids = [concept_id for concept_id in fallback_ids if concept_id in c1_c7_ids]
-
-    ordered_ids = set1_ids + [concept_id for concept_id in fallback_ids if concept_id not in set1_ids]
     selected: list[str] = []
     selected_candidates: list[dict[str, Any]] = []
     candidates_by_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for candidate in candidate_rows:
         candidates_by_id[candidate["concept_id"]].append(candidate)
-    for concept_id in ordered_ids:
-        potential = candidates_by_id[concept_id]
-        selected_ids = set(selected)
-        selected_owners = query_owner_map(selected_candidates)
-        has_nonconflicting_query = any(
-            not (target_owners.get(candidate["query"], set()) - {concept_id})
-            and not (selected_owners.get(candidate["query"], set()) - {concept_id})
-            for candidate in potential
-        )
-        if not has_nonconflicting_query:
+    rows_by_id = {
+        row["concept_id"]: row
+        for row in [*(item for group in fewshot_sets.values() for item in group), *directions_rows, *test_rows]
+    }
+    selected_queries: dict[str, set[str]] = defaultdict(set)
+    selected_pos: set[str] = set()
+
+    def candidate_for(concept_id: str) -> dict[str, Any] | None:
+        row = rows_by_id.get(concept_id)
+        if row is None or row.get("collapsed") is not False or concept_id in test_ids:
+            return None
+        options = [
+            candidate for candidate in candidates_by_id.get(concept_id, [])
+            if not (target_owners.get(candidate["query"], set()) - {concept_id})
+            and not (selected_queries.get(candidate["query"], set()) - {concept_id})
+        ]
+        if not options:
+            return None
+        return choose_examples(options, preferred_min_tokens=preferred_min_tokens)[concept_id]
+
+    preferred_forms = [normalize_nfc(value).casefold() for value in preferred_vi]
+    for set_number in (*range(1, 7), 0):
+        if set_number == 0:
+            tier_rows = directions_rows
+        else:
+            tier_rows = fewshot_sets.get(set_number, [])
+        by_id = {row["concept_id"]: row for row in tier_rows}
+        if not by_id:
             continue
-        selected.append(concept_id)
-        selected_candidates.extend(potential)
-        if len(selected) == demo_count:
-            break
-    return selected
+
+        preferred_ids: list[str] = []
+        if set_number == 1:
+            for form in preferred_forms:
+                preferred_ids.extend(
+                    concept_id for concept_id, row in sorted(by_id.items())
+                    if normalize_nfc(row["vi_canonical"]).casefold() == form
+                    and concept_id not in preferred_ids
+                )
+
+        # Preferred set-1 concepts are tried first. Remaining items are greedily
+        # selected to introduce a new POS before reusing one, with concept_id ties.
+        remaining = [concept_id for concept_id in sorted(by_id) if concept_id not in preferred_ids]
+        ordered = [*preferred_ids]
+        while remaining:
+            available = [concept_id for concept_id in remaining if candidate_for(concept_id) is not None]
+            if not available:
+                break
+            new_pos = [
+                concept_id for concept_id in available
+                if candidate_for(concept_id)["pos"] not in selected_pos
+            ]
+            chosen = min(new_pos or available)
+            ordered.append(chosen)
+            remaining.remove(chosen)
+
+        for concept_id in ordered:
+            if concept_id in selected:
+                continue
+            candidate = candidate_for(concept_id)
+            if candidate is None:
+                continue
+            selected.append(concept_id)
+            selected_candidates.append(candidate)
+            selected_pos.add(candidate["pos"])
+            selected_queries[candidate["query"]].add(concept_id)
+            if len(selected) == demo_count:
+                return selected_candidates
+    return selected_candidates
 
 
 def apply_c8(
@@ -624,7 +857,7 @@ def build_record(
     *,
     prompt: str,
     condition: str,
-    fewshot_set: int,
+    fewshot_set: int | None,
     vi_target: str,
     demo_concept_ids: list[str],
 ) -> dict[str, Any]:
@@ -673,7 +906,7 @@ def verify_records(
     rows_by_id: dict[str, dict[str, Any]],
     demo_concept_ids: list[str],
     answer_label: str,
-    primary_set: int,
+    primary_set: int | None,
 ) -> None:
     """Assert the v1.2 cloze schema plus demo IDs and the task's prompt invariants."""
     expected_fields = {
@@ -749,16 +982,14 @@ def build_cloze_v13(
 
     settings = config["prompts"]["cloze_v13"]
     paths = settings["paths"]
-    fewshot_pool_ids = {
-        row["concept_id"]
-        for set_number in (1, int(settings["fallback_fewshot_set"]))
-        for row in fewshot_sets.get(set_number, [])
-    }
+    fewshot_pool_ids = {row["concept_id"] for group in fewshot_sets.values() for row in group}
     rows_by_id = {row["concept_id"]: row for row in all_rows}
     test_ids = {row["concept_id"] for row in test_rows}
     if test_ids.intersection(fewshot_pool_ids):
         raise AssertionError("Test cloze targets overlap the selected few-shot sets")
-    candidate_rows = [rows_by_id[concept_id] for concept_id in sorted(test_ids | fewshot_pool_ids)]
+    direction_ids = {row["concept_id"] for row in all_rows if row.get("split") == "directions"}
+    candidate_rows = [rows_by_id[concept_id] for concept_id in sorted(test_ids | fewshot_pool_ids | direction_ids)]
+    directions_rows = [rows_by_id[concept_id] for concept_id in sorted(direction_ids)]
     wanted_keys = {vi_orth_key(row["vi_canonical"]) for row in candidate_rows}
     vi_dump = Path(config["etymology"]["paths"]["vietnamese_dump"])
     entries_by_key, headwords = stream_vi_entries_and_headwords(
@@ -783,6 +1014,15 @@ def build_cloze_v13(
 
     source_code = config["nllb"]["lang_codes"]["vi"]
     target_code = config["nllb"]["lang_codes"]["en"]
+    legacy_point_recheck = recheck_point_sample(
+        example_candidates,
+        translator=translator,
+        nlp=nlp,
+        wordnet_reader=wordnet_reader,
+        source_code=source_code,
+        target_code=target_code,
+        use_all_returned_beams=bool(settings["semantic_use_all_returned_beams"]),
+    )
     before_calls = int(getattr(translator, "translation_calls", 0))
     before_hits = int(getattr(translator, "cache_hits", 0))
     c1_c7, funnel_counts, failures, per_concept_counts, nllb_stats, stage_pos = filter_cloze_candidates_c1_to_c7(
@@ -801,18 +1041,18 @@ def build_cloze_v13(
         source_code=source_code,
         target_code=target_code,
     )
-    c1_c7_ids = {candidate["concept_id"] for candidate in c1_c7}
-    demo_ids = select_demo_concept_ids(
+    demo_candidates = select_demo_concept_ids(
         candidate_rows=c1_c7,
         fewshot_sets=fewshot_sets,
+        directions_rows=directions_rows,
         preferred_vi=list(settings["preferred_demo_vi"]),
         demo_count=int(settings["demo_count"]),
-        fallback_set=int(settings["fallback_fewshot_set"]),
-        seed=int(config["seed"]),
+        preferred_min_tokens=int(settings["preferred_example_min_tokens"]),
         test_rows=test_rows,
     )
+    demo_ids = [candidate["concept_id"] for candidate in demo_candidates]
     final_concept_ids = test_ids | set(demo_ids)
-    c8_input = [candidate for candidate in c1_c7 if candidate["concept_id"] in final_concept_ids]
+    c8_input = [candidate for candidate in c1_c7 if candidate["concept_id"] in test_ids] + demo_candidates
     per_concept_counts = {
         concept_id: per_concept_counts.get(concept_id, {"candidates": 0})
         for concept_id in final_concept_ids
@@ -843,7 +1083,7 @@ def build_cloze_v13(
     collapsed_demos = [
         {"concept_id": concept_id, "vi": rows_by_id[concept_id]["vi_canonical"]}
         for concept_id in demo_ids
-        if rows_by_id[concept_id].get("collapsed") is True
+        if rows_by_id[concept_id].get("collapsed") is not False
     ]
     if collapsed_demos:
         raise ValueError(f"Selected cloze demonstration(s) are collapsed; stop per Step 5: {collapsed_demos!r}")
@@ -870,6 +1110,8 @@ def build_cloze_v13(
     main_by_stratum_survived = Counter(row["stratum"] for row in main_rows)
     extension_by_stratum_total = Counter(row["stratum"] for row in test_rows if row["m1_extension"] is True)
     extension_by_stratum_survived = Counter(row["stratum"] for row in extension_rows)
+    main_nodiac_by_stratum = Counter(row["stratum"] for row in main_nodiac_rows)
+    extension_nodiac_by_stratum = Counter(row["stratum"] for row in extension_nodiac_rows)
 
     old_path = Path(config["prompts"]["paths"]["output_dir"]) / "cloze_diac_set1.jsonl"
     old_rows = list(iter_jsonl(old_path))
@@ -881,6 +1123,36 @@ def build_cloze_v13(
         answer_label=config["prompts"]["cloze"]["answer_label"],
     )
     write_failure_jsonl(paths["candidate_failures"], failures)
+    dropped_by_id = {item["concept_id"]: item["failed rule"] for item in dropped}
+    legacy_sample_rechecks: list[dict[str, Any]] = []
+    for sample_id, expected_vi, expected_en in LEGACY_SAMPLE_ITEMS:
+        matches = [
+            row for row in test_rows
+            if normalize_nfc(row["vi_canonical"]).strip().casefold() == expected_vi.casefold()
+            and normalize_nfc(row["en_lemma"]).strip().casefold() == expected_en.casefold()
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                f"Expected one test concept for sample item {sample_id} {expected_vi!r}/{expected_en!r}; found {len(matches)}"
+            )
+        source_row = matches[0]
+        concept_id = source_row["concept_id"]
+        survivor = test_selected.get(concept_id)
+        legacy_sample_rechecks.append({
+            "sample_item": sample_id,
+            "concept_id": concept_id,
+            "vi": source_row["vi_canonical"],
+            "en": source_row["en_lemma"],
+            "failed_rule": (
+                None if survivor is not None else
+                dropped_by_id.get(concept_id) or first_empty_rule(per_concept_counts.get(concept_id, {"candidates": 0}))
+            ),
+            "survived": survivor is not None,
+            "NLLB English": survivor["nllb_english"] if survivor is not None else None,
+            "NLLB limit hits": survivor["nllb_limit_hits"] if survivor is not None else None,
+            "C7 matched type": survivor["c7_match_type"] if survivor is not None else None,
+            "C7 matched word": survivor["c7_match_word"] if survivor is not None else None,
+        })
 
     funnel = {
         scope: [
@@ -899,22 +1171,44 @@ def build_cloze_v13(
         for row in ids
         for _ in [0]
     }
-    fallback_ids = [concept_id for concept_id in demo_ids if demo_set_by_id.get(concept_id) == int(settings["fallback_fewshot_set"])]
+    demo_sources = {
+        concept_id: f"fewshot_set_{demo_set_by_id[concept_id]}" if concept_id in demo_set_by_id else "directions"
+        for concept_id in demo_ids
+    }
     sample_pool = sorted(test_selected.values(), key=lambda item: item["concept_id"])
     sample_n = min(int(settings["survivor_sample_n"]), len(sample_pool))
     rng = np.random.default_rng(int(config["seed"]))
     sample = [sample_pool[index] for index in rng.permutation(len(sample_pool)).tolist()[:sample_n]]
     sample_rows = [
         {
+            "concept_id": candidate["concept_id"],
             "vi": candidate["vi"],
             "en": candidate["en"],
             "en_sense_gloss": candidate["en_sense_gloss"],
             "query": candidate["query"],
-            "NLLB English": candidate["nllb_english"][0] if candidate["nllb_english"] else "",
+            "NLLB English": candidate["nllb_english"],
+            "NLLB limit hits": candidate["nllb_limit_hits"],
+            "C7 matched type": candidate["c7_match_type"],
+            "C7 matched word": candidate["c7_match_word"],
             "m1_extension": candidate["m1_extension"],
             "stratum": candidate["stratum"],
         }
         for candidate in sample
+    ]
+    surviving_test_items = [
+        {
+            "concept_id": candidate["concept_id"],
+            "vi": candidate["vi"],
+            "en": candidate["en"],
+            "en_sense_gloss": candidate["en_sense_gloss"],
+            "query": candidate["query"],
+            "NLLB English": candidate["nllb_english"],
+            "C7 matched type": candidate["c7_match_type"],
+            "C7 matched word": candidate["c7_match_word"],
+            "m1_extension": candidate["m1_extension"],
+            "stratum": candidate["stratum"],
+        }
+        for candidate in sorted(test_selected.values(), key=lambda item: item["concept_id"])
     ]
     coverage = {
         "main": {
@@ -959,17 +1253,24 @@ def build_cloze_v13(
             "nodiac_records": len(test_cloze_nodiac_rows),
             "main_nodiac_records": len(main_nodiac_rows),
             "extension_nodiac_records": len(extension_nodiac_rows),
-            "nonsino_subset": sum(row["stratum"] == "nonsino" for row in [*main_rows, *extension_rows]),
             "by_stratum": {
-                "main": dict(sorted(main_by_stratum_survived.items())),
-                "extension": dict(sorted(extension_by_stratum_survived.items())),
+                "diac": {
+                    "main": dict(sorted(main_by_stratum_survived.items())),
+                    "extension": dict(sorted(extension_by_stratum_survived.items())),
+                },
+                "nodiac": {
+                    "main": dict(sorted(main_nodiac_by_stratum.items())),
+                    "extension": dict(sorted(extension_nodiac_by_stratum.items())),
+                },
             },
         },
         "coverage": coverage,
+        "legacy_sample_rechecks": legacy_sample_rechecks,
+        "legacy_point_c7_recheck": legacy_point_recheck,
         "demo_concept_ids": demo_ids,
+        "demo_sources": demo_sources,
         "demo_count_required": int(settings["demo_count"]),
         "demo_count_available": len(demo_ids),
-        "demo_fallback_ids_from_set_2": fallback_ids,
         "candidate_failure_records": len(failures),
         "dropped_old_concepts": len(dropped),
         "nllb": {
@@ -980,12 +1281,18 @@ def build_cloze_v13(
             "revision": step07_config["revision"],
             "num_beams": step07_config["num_beams"],
             "num_return": step07_config["num_return"],
+            "max_new_tokens": int(getattr(translator, "max_new_tokens", step07_config["max_new_tokens"])),
         },
-        "semantic_rule": "any configured return beam contains a lemmatized exact lemma/head lemma or WordNet synonym",
+        "semantic_rule": "any untruncated configured return beam contains a lemmatized target lemma, two-word head lemma, or same-POS WordNet synset lemma",
         "survivor_sample_seed": int(config["seed"]),
         "survivor_sample": sample_rows,
-        "minimum_main_survivors_to_write": int(settings["minimum_main_survivors_to_write"]),
-        "minimum_main_survivors_met": len(main_rows) >= int(settings["minimum_main_survivors_to_write"]),
+        "surviving_test_items": surviving_test_items,
+        "maximum_main_survivors": int(settings["maximum_main_survivors"]),
+        "maximum_extension_survivors": int(settings["maximum_extension_survivors"]),
+        "within_previous_upper_bounds": (
+            len(main_rows) <= int(settings["maximum_main_survivors"])
+            and len(extension_rows) <= int(settings["maximum_extension_survivors"])
+        ),
     }
 
     audit_path = Path(paths["audit_report"])
@@ -997,20 +1304,46 @@ def build_cloze_v13(
     for scope, stages in funnel.items():
         logger.info("Cloze v1.3 candidate funnel %s: %s", scope, json.dumps(stages, sort_keys=True))
     logger.info("Cloze v1.3 final coverage: %s", json.dumps(coverage, sort_keys=True))
-    logger.info("Cloze v1.3 demonstrations: %s; fallback from set 2=%s", demo_ids, fallback_ids)
+    logger.info("Cloze v1.3 demonstrations: %s; sources=%s", demo_ids, demo_sources)
     logger.info("Cloze v1.3 candidate failures=%d; old concepts dropped=%d; NLLB stats=%s",
                 len(failures), len(dropped), json.dumps(report["nllb"], sort_keys=True))
 
+    insufficient_demos = len(demo_ids) < int(settings["demo_count"])
+    above_upper_bound = (
+        len(main_rows) > int(settings["maximum_main_survivors"])
+        or len(extension_rows) > int(settings["maximum_extension_survivors"])
+    )
+    if insufficient_demos or above_upper_bound:
+        return {
+            "records": {"diac": [], "nodiac": []},
+            "demo_concept_ids": demo_ids,
+            "demo_cloze_rows": [],
+            "test_cloze_rows": test_cloze_rows,
+            "test_nodiac_rows": test_cloze_nodiac_rows,
+            "masked_by_id": {row["concept_id"]: test_selected.get(row["concept_id"], {}).get("query") for row in test_rows},
+            "report": report,
+            "stage_pos": stage_pos,
+            "c8_pos": stage_pos["after_C8"],
+            "c8_input_by_scope": _stage_counts(c8_input),
+            "funnel_counts": funnel_counts,
+            "per_concept_counts": per_concept_counts,
+            "failure_count": len(failures),
+            "main_survivors": len(main_rows),
+            "dropped_old_concepts": len(dropped),
+            "old_query_count": len(old_rows),
+            "demo_sources": demo_sources,
+            "stop_reason": "insufficient_cloze_demonstrations" if insufficient_demos else "survivors_above_previous_upper_bound",
+        }
+
     demo_concept_ids = list(demo_ids)
     demo_cloze_rows = [
-        {"sentence": candidate["query"], "answer": rows_by_id[concept_id]["vi_canonical"]}
+        {"query": candidate["query"], "vi": rows_by_id[concept_id]["vi_canonical"]}
         for concept_id, candidate in zip(demo_ids, [selected_by_id[concept_id] for concept_id in demo_ids])
     ]
     diac_records: list[dict[str, Any]] = []
     nodiac_records: list[dict[str, Any]] = []
     answer_label = config["prompts"]["cloze"]["answer_label"]
-    primary_set = int(config["prompts"]["fewshot"]["primary_set"])
-    insufficient_demos = len(demo_ids) < int(settings["demo_count"])
+    primary_set = None
     for row in ([] if insufficient_demos else test_cloze_rows):
         candidate = test_selected[row["concept_id"]]
         vi_text = row["vi_canonical"]
@@ -1061,8 +1394,14 @@ def build_cloze_v13(
         "main_survivors": len(main_rows),
         "dropped_old_concepts": len(dropped),
         "old_query_count": len(old_rows),
-        "demo_fallback_ids": fallback_ids,
-        "stop_reason": "insufficient_cloze_demonstrations" if insufficient_demos else None,
+        "demo_sources": demo_sources,
+        "stop_reason": (
+            "insufficient_cloze_demonstrations" if insufficient_demos
+            else "survivors_above_previous_upper_bound"
+            if len(main_rows) > int(settings["maximum_main_survivors"])
+            or len(extension_rows) > int(settings["maximum_extension_survivors"])
+            else None
+        ),
     }
 
 

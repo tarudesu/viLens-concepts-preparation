@@ -219,6 +219,14 @@ class NLLBTranslator:
         return self.cache_dir / f"{hashlib.sha256(encoded).hexdigest()}.json"
 
     def _generate_batch(self, source: str, target: str, texts: list[str]) -> list[list[str]]:
+        """Generate decoded translations, discarding token-limit metadata for legacy callers."""
+        outputs, _ = self._generate_batch_with_limit_hits(source, target, texts)
+        return outputs
+
+    def _generate_batch_with_limit_hits(
+        self, source: str, target: str, texts: list[str],
+    ) -> tuple[list[list[str]], list[list[bool]]]:
+        """Generate translations and flag every beam that reaches max_new_tokens."""
         self.tokenizer.src_lang = source
         encoded = self.tokenizer(texts, return_tensors="pt", padding=True, truncation=True)
         encoded = encoded.to(self.device)
@@ -233,14 +241,37 @@ class NLLBTranslator:
         expected = len(texts) * self.num_return
         if len(decoded) != expected:
             raise RuntimeError(f"NLLB returned {len(decoded)} sequences for {len(texts)} inputs; expected {expected}")
-        return [decoded[index:index + self.num_return] for index in range(0, expected, self.num_return)]
+        eos_id = self.tokenizer.eos_token_id
+        limit_hits = [
+            self.sequence_reached_token_limit(sequence.tolist(), eos_id=eos_id, max_new_tokens=self.max_new_tokens)
+            for sequence in generated
+        ]
+        return (
+            [decoded[index:index + self.num_return] for index in range(0, expected, self.num_return)],
+            [limit_hits[index:index + self.num_return] for index in range(0, expected, self.num_return)],
+        )
 
-    def _write_cache(self, path: Path, payload: dict[str, Any], outputs: list[str]) -> None:
+    @staticmethod
+    def sequence_reached_token_limit(sequence: list[int], *, eos_id: int | None, max_new_tokens: int) -> bool:
+        """Return whether a sequence consumed the configured generated-token budget."""
+        if max_new_tokens < 1:
+            raise ValueError("max_new_tokens must be positive")
+        generated = sequence[1:]
+        if eos_id is not None and eos_id in generated:
+            generated = generated[:generated.index(eos_id) + 1]
+        return len(generated) >= max_new_tokens
+
+    def _write_cache(
+        self, path: Path, payload: dict[str, Any], outputs: list[str], limit_hits: list[bool] | None = None,
+    ) -> None:
         temporary = None
         try:
             with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", dir=path.parent, prefix=".nllb.", suffix=".json", delete=False) as handle:
                 temporary = handle.name
-                json.dump({"payload": payload, "outputs": outputs}, handle, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                cache_record = {"payload": payload, "outputs": outputs}
+                if limit_hits is not None:
+                    cache_record["limit_hits"] = limit_hits
+                json.dump(cache_record, handle, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
                 handle.write("\n")
             os.replace(temporary, path)
         finally:
@@ -299,6 +330,85 @@ class NLLBTranslator:
             if key in results:
                 continue
             raise RuntimeError(f"NLLB translation result missing for request {key!r}")
+        return results
+
+    def translate_many_with_limit_hits(
+        self, requests: list[tuple[str, str, str]],
+    ) -> dict[tuple[str, str, str], dict[str, list[Any]]]:
+        """Resolve translations and per-beam generation-limit flags from cache or NLLB."""
+        payloads: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for source, target, text in requests:
+            key = (source, target, normalize_nfc(text))
+            payloads.setdefault(key, self._payload(source, target, text))
+        self.in_memory_reuses += len(requests) - len(payloads)
+        results: dict[tuple[str, str, str], dict[str, list[Any]]] = {}
+        misses: dict[tuple[str, str, str], tuple[dict[str, Any], Path]] = {}
+        for key in sorted(payloads):
+            payload = payloads[key]
+            path = self._cache_path(payload)
+            if path.exists():
+                try:
+                    cached = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError) as exc:
+                    raise ValueError(f"Invalid NLLB cache file {path}: {exc}") from exc
+                valid_outputs = (
+                    cached.get("payload") == payload
+                    and isinstance(cached.get("outputs"), list)
+                    and len(cached["outputs"]) == self.num_return
+                    and all(isinstance(item, str) for item in cached["outputs"])
+                )
+                valid_hits = (
+                    isinstance(cached.get("limit_hits"), list)
+                    and len(cached["limit_hits"]) == self.num_return
+                    and all(type(item) is bool for item in cached["limit_hits"])
+                )
+                if valid_outputs and valid_hits:
+                    results[key] = {
+                        "outputs": [normalize_nfc(item) for item in cached["outputs"]],
+                        "limit_hits": list(cached["limit_hits"]),
+                    }
+                    self.cache_hits += 1
+                    continue
+                if not valid_outputs:
+                    raise ValueError(f"NLLB cache content does not match its key or expected output schema: {path}")
+            misses[key] = (payload, path)
+
+        grouped: dict[tuple[str, str], list[tuple[str, str, str]]] = defaultdict(list)
+        for key in misses:
+            grouped[(key[0], key[1])].append(key)
+        total_misses = len(misses)
+        completed_misses = 0
+        next_report = self.progress_every
+        if total_misses:
+            self.logger.info(
+                "NLLB detailed cache lookup: %d unique requests, %d new translations",
+                len(payloads), total_misses,
+            )
+        for source, target in sorted(grouped):
+            keys = sorted(grouped[(source, target)])
+            for offset in range(0, len(keys), self.batch_size):
+                batch_keys = keys[offset:offset + self.batch_size]
+                batch_outputs, batch_hits = self._generate_batch_with_limit_hits(
+                    source, target, [key[2] for key in batch_keys],
+                )
+                self.generation_batches += 1
+                self.translation_calls += len(batch_keys)
+                for key, outputs, hits in zip(batch_keys, batch_outputs, batch_hits, strict=True):
+                    payload, path = misses[key]
+                    self._write_cache(path, payload, outputs, hits)
+                    results[key] = {"outputs": outputs, "limit_hits": hits}
+                completed_misses += len(batch_keys)
+                if completed_misses >= next_report or completed_misses == total_misses:
+                    self.logger.info(
+                        "NLLB detailed translation progress: %d/%d input texts; generate batches=%d",
+                        completed_misses, total_misses, self.generation_batches,
+                    )
+                    while next_report <= completed_misses:
+                        next_report += self.progress_every
+        for source, target, text in requests:
+            key = (source, target, normalize_nfc(text))
+            if key not in results:
+                raise RuntimeError(f"NLLB detailed translation result missing for request {key!r}")
         return results
 
 

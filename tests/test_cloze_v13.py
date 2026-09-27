@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 from pathlib import Path
 
 from data.build import cloze_v13
+
+STEP07_PATH = Path(__file__).parents[1] / "data" / "build" / "07_backtranslate.py"
+STEP07_SPEC = importlib.util.spec_from_file_location("step07_for_cloze_test", STEP07_PATH)
+assert STEP07_SPEC and STEP07_SPEC.loader
+step07 = importlib.util.module_from_spec(STEP07_SPEC)
+STEP07_SPEC.loader.exec_module(step07)
 
 
 def _whole_word(needle: str, text: str) -> bool:
@@ -20,11 +27,23 @@ def test_whitespace_cleanup_and_exact_boundary_masking() -> None:
     assert cloze_v13.mask_exactly_once("họcdance rất vui", "học") == (None, 0)
 
 
-def test_compound_check_uses_both_adjacent_syllables() -> None:
+def test_raw_newline_rule_token_count_and_vietnamese_syllable_gate() -> None:
+    assert cloze_v13.is_single_line_raw_example("Tôi học ở trường.")
+    assert not cloze_v13.is_single_line_raw_example("Tôi học\nở trường.")
+    assert not cloze_v13.is_single_line_raw_example("Tôi học\rở trường.")
+    assert cloze_v13.count_query_tokens("… ; Em ___ học ở trường -") == 5
+    assert cloze_v13.c5b_unknown_tokens("Em ___ học ở trường", {"em", "học", "ở", "trường"}) == []
+    assert cloze_v13.c5b_unknown_tokens("Em ___ học virgin", {"em", "học"}) == ["virgin"]
+
+
+def test_compound_check_scans_full_headword_windows() -> None:
     assert cloze_v13.compound_headword_conflict("Em ___ học hôm nay", "đuổi", {"đuổi học"}) == "đuổi học"
     assert cloze_v13.compound_headword_conflict("Tôi thấy ___ miếng", "vàng", {"vàng miếng"}) == "vàng miếng"
     assert cloze_v13.compound_headword_conflict("Em “___” học hôm nay", "đuổi", {"đuổi học"}) == "đuổi học"
     assert cloze_v13.compound_headword_conflict("Tôi ___ rồi", "vàng", {"vàng miếng"}) is None
+    assert cloze_v13.compound_headword_conflict(
+        "___ nhân dân họp hôm nay", "hội đồng", {"hội đồng nhân dân"},
+    ) == "hội đồng nhân dân"
 
 
 def test_c1_uses_aligned_senses_and_single_sense_fallback() -> None:
@@ -39,6 +58,22 @@ def test_c1_uses_aligned_senses_and_single_sense_fallback() -> None:
     assert [candidate["c1_allowed"] for candidate in by_id["aligned"]] == [False, True]
     assert by_id["fallback"][0]["c1_allowed"] is True
     assert empty == {"aligned": 2, "fallback": 1}
+
+    entry = {
+        "word": "học", "pos": "noun", "senses": [{"glosses": ["study"], "examples": [
+            {"text": "Own example."},
+            {"text": "Quoted text.", "type": "quotation"},
+            {"text": "Cited example.", "ref": "book"},
+            {"text": "No source fields."},
+        ]}],
+    }
+    filtered, _ = cloze_v13.collect_example_candidates(
+        [fixture["rows"][0]], entries_by_key={"học": [entry]}, contains_whole_word=_whole_word,
+    )
+    assert [item["c1_allowed"] for item in filtered] == [True, False, False, True]
+    assert [item["example_text"] for item in filtered] == [
+        "Own example.", "Quoted text.", "Cited example.", "No source fields.",
+    ]
 
 
 def test_lemma_matching_and_example_selection_are_deterministic() -> None:
@@ -58,6 +93,93 @@ def test_lemma_matching_and_example_selection_are_deterministic() -> None:
     assert chosen["d"]["query"] == "a longest"
 
 
+class _Token:
+    def __init__(self, text: str) -> None:
+        self.lemma_ = text.casefold()
+        self.is_space = False
+        self.is_punct = False
+        self.head = self
+
+
+class _Doc(list):
+    pass
+
+
+class _NLP:
+    def __call__(self, text: str) -> _Doc:
+        return _Doc(_Token(part) for part in text.replace("_", " ").split())
+
+
+class _Lemma:
+    def __init__(self, word: str) -> None:
+        self.word = word
+
+    def name(self) -> str:
+        return self.word
+
+
+class _Synset:
+    def lemmas(self) -> list[_Lemma]:
+        return [_Lemma("cop")]
+
+
+class _WordNet:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def synsets(self, word: str, *, pos: str) -> list[_Synset]:
+        self.calls.append((word, pos))
+        return [_Synset()]
+
+
+def test_c7_uses_exact_head_and_same_pos_wordnet_only() -> None:
+    wordnet = _WordNet()
+    targets = cloze_v13.english_match_targets(
+        "spelling police", pos="noun", nlp=_NLP(), wordnet_reader=wordnet,
+    )
+    assert wordnet.calls == [("spelling_police", "n")]
+    assert cloze_v13.match_c7_output(("police", "arrive"), targets) == {
+        "type": "two_word_head_lemma", "word": "police",
+    }
+    assert cloze_v13.match_c7_output(("cop",), targets) == {
+        "type": "wordnet_synset_lemma", "word": "cop",
+    }
+    assert cloze_v13.match_c7_output(("officer",), targets) is None
+
+
+def test_named_rebuild_sample_defects_have_strict_rule_guards() -> None:
+    # #8 hôm qua: physical line breaks fail before whitespace normalization.
+    assert not cloze_v13.is_single_line_raw_example("Hôm qua tôi đi\nđến trường.")
+    # #14 núi lửa: a longer fixed headword spanning the blank is detected.
+    assert cloze_v13.compound_headword_conflict(
+        "___ phun trào hôm nay", "núi lửa", {"núi lửa phun trào"},
+    ) == "núi lửa phun trào"
+    # #15 trinh nữ and #16 phương pháp: English translation leakage is not VI syllabic text.
+    vi_syllables = {"cô", "gái", "trinh", "nữ", "phương", "pháp", "là"}
+    assert cloze_v13.c5b_unknown_tokens("___ là virgin", vi_syllables) == ["virgin"]
+    assert cloze_v13.c5b_unknown_tokens("___ là method", vi_syllables) == ["method"]
+    # #19 tượng đài and #22 hội chứng: absent target terms do not pass C7.
+    for english in ("monument", "syndrome"):
+        targets = cloze_v13.english_match_targets(
+            english, pos="noun", nlp=_NLP(), wordnet_reader=type("EmptyWN", (), {"synsets": lambda *_args, **_kwargs: []})(),
+        )
+        assert cloze_v13.match_c7_output(("a", "building"), targets) is None
+    # #4 chỉ can pass only through an untruncated output containing point.
+    point_targets = cloze_v13.english_match_targets(
+        "point", pos="noun", nlp=_NLP(), wordnet_reader=type("EmptyWN", (), {"synsets": lambda *_args, **_kwargs: []})(),
+    )
+    assert cloze_v13.match_c7_output(("point",), point_targets) == {
+        "type": "target_lemma", "word": "point",
+    }
+    assert cloze_v13.match_c7_output(("shower",), point_targets) is None
+    assert cloze_v13.match_untruncated_c7_beams(
+        [("point",), ("shower",)], [True, False], point_targets,
+    ) is None
+    assert cloze_v13.match_untruncated_c7_beams(
+        [("point",), ("shower",)], [False, False], point_targets,
+    ) == {"type": "target_lemma", "word": "point"}
+
+
 def test_c8_removes_shared_queries_and_old_query_extraction_handles_multiline() -> None:
     candidates = [
         {"candidate_id": "a", "concept_id": "a", "query": "___ here", "pos": "noun", "split": "test", "m1_extension": False},
@@ -71,3 +193,10 @@ def test_c8_removes_shared_queries_and_old_query_extraction_handles_multiline() 
     assert counts["a"]["after_C8"] == 0
     prompt = "Demo ___\nĐáp án: A\nDemo ___\nĐáp án: B\nDemo ___\nĐáp án: C\nA poem\nline two\nĐáp án:"
     assert cloze_v13.old_query_from_prompt(prompt, "Đáp án:") == "A poem\nline two"
+
+
+def test_nllb_limit_guard_flags_only_sequences_that_reach_budget() -> None:
+    reached_limit = step07.NLLBTranslator.sequence_reached_token_limit
+    assert reached_limit([0, 10, 2], eos_id=2, max_new_tokens=2)
+    assert not reached_limit([0, 10, 2], eos_id=2, max_new_tokens=3)
+    assert reached_limit([0, 10, 11, 12], eos_id=2, max_new_tokens=3)
