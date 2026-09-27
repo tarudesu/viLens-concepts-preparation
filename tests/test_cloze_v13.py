@@ -239,6 +239,12 @@ def test_c8_uses_c3_pool_for_xa_hoi_chu_nghia_f22472e471f9_collision() -> None:
     assert failures == []
 
 
+def test_nodiac_demo_rows_strips_query_and_fill() -> None:
+    assert cloze_v13.nodiac_demo_rows([
+        {"query": "Việt Nam ở ___", "vi": "Đường phố"},
+    ]) == [{"query": "Viet Nam o ___", "vi": "Duong pho"}]
+
+
 def test_nllb_limit_guard_flags_only_sequences_that_reach_budget() -> None:
     reached_limit = step07.NLLBTranslator.sequence_reached_token_limit
     assert reached_limit([0, 10, 2], eos_id=2, max_new_tokens=2)

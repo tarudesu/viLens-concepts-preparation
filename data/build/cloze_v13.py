@@ -929,6 +929,17 @@ def render_prompt(
     return "\n".join(lines)
 
 
+def nodiac_demo_rows(demo_rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Strip Vietnamese diacritics from demo queries and fills for nodiac prompts."""
+    return [
+        {
+            "query": strip_diacritics(item["query"], preserve_case=True),
+            "vi": strip_diacritics(item["vi"], preserve_case=True),
+        }
+        for item in demo_rows
+    ]
+
+
 def verify_records(
     records: dict[str, list[dict[str, Any]]],
     *,
@@ -1384,15 +1395,9 @@ def build_cloze_v13(
             vi_target=vi_text, demo_concept_ids=demo_concept_ids,
         ))
         if not row["collapsed"]:
-            nodiac_demo_rows = [
-                {
-                    "query": strip_diacritics(item["sentence"], preserve_case=True),
-                    "vi": strip_diacritics(item["answer"], preserve_case=True),
-                }
-                for item in demo_cloze_rows
-            ]
+            nodiac_demos = nodiac_demo_rows(demo_cloze_rows)
             nodiac_query = strip_diacritics(candidate["query"], preserve_case=True)
-            nodiac_prompt = render_prompt(nodiac_demo_rows, query=nodiac_query, answer_label=strip_diacritics(answer_label, preserve_case=True))
+            nodiac_prompt = render_prompt(nodiac_demos, query=nodiac_query, answer_label=strip_diacritics(answer_label, preserve_case=True))
             nodiac_records.append(build_record(
                 row, prompt=nodiac_prompt, condition="nodiac", fewshot_set=primary_set,
                 vi_target=strip_diacritics(vi_text, preserve_case=True),

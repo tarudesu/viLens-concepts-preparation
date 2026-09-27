@@ -1,0 +1,1815 @@
+{
+  "candidate_failure_records": 660,
+  "candidate_funnel": {
+    "extension": [
+      {
+        "n": 199,
+        "n_by_pos": {
+          "adj": 26,
+          "noun": 106,
+          "verb": 67
+        },
+        "stage": "candidates"
+      },
+      {
+        "n": 93,
+        "n_by_pos": {
+          "adj": 14,
+          "noun": 44,
+          "verb": 35
+        },
+        "stage": "after_C1"
+      },
+      {
+        "n": 92,
+        "n_by_pos": {
+          "adj": 14,
+          "noun": 44,
+          "verb": 34
+        },
+        "stage": "after_C2"
+      },
+      {
+        "n": 92,
+        "n_by_pos": {
+          "adj": 14,
+          "noun": 44,
+          "verb": 34
+        },
+        "stage": "after_C3"
+      },
+      {
+        "n": 9,
+        "n_by_pos": {
+          "adj": 1,
+          "noun": 4,
+          "verb": 4
+        },
+        "stage": "after_C4"
+      },
+      {
+        "n": 9,
+        "n_by_pos": {
+          "adj": 1,
+          "noun": 4,
+          "verb": 4
+        },
+        "stage": "after_C5"
+      },
+      {
+        "n": 9,
+        "n_by_pos": {
+          "adj": 1,
+          "noun": 4,
+          "verb": 4
+        },
+        "stage": "after_C6"
+      },
+      {
+        "n": 7,
+        "n_by_pos": {
+          "adj": 1,
+          "noun": 3,
+          "verb": 3
+        },
+        "stage": "after_C7"
+      },
+      {
+        "n": 7,
+        "n_by_pos": {
+          "adj": 1,
+          "noun": 3,
+          "verb": 3
+        },
+        "stage": "after_C8"
+      }
+    ],
+    "main": [
+      {
+        "n": 462,
+        "n_by_pos": {
+          "adj": 53,
+          "noun": 361,
+          "verb": 48
+        },
+        "stage": "candidates"
+      },
+      {
+        "n": 382,
+        "n_by_pos": {
+          "adj": 48,
+          "noun": 290,
+          "verb": 44
+        },
+        "stage": "after_C1"
+      },
+      {
+        "n": 351,
+        "n_by_pos": {
+          "adj": 46,
+          "noun": 262,
+          "verb": 43
+        },
+        "stage": "after_C2"
+      },
+      {
+        "n": 336,
+        "n_by_pos": {
+          "adj": 44,
+          "noun": 251,
+          "verb": 41
+        },
+        "stage": "after_C3"
+      },
+      {
+        "n": 67,
+        "n_by_pos": {
+          "adj": 5,
+          "noun": 51,
+          "verb": 11
+        },
+        "stage": "after_C4"
+      },
+      {
+        "n": 59,
+        "n_by_pos": {
+          "adj": 5,
+          "noun": 44,
+          "verb": 10
+        },
+        "stage": "after_C5"
+      },
+      {
+        "n": 58,
+        "n_by_pos": {
+          "adj": 5,
+          "noun": 43,
+          "verb": 10
+        },
+        "stage": "after_C6"
+      },
+      {
+        "n": 38,
+        "n_by_pos": {
+          "adj": 4,
+          "noun": 26,
+          "verb": 8
+        },
+        "stage": "after_C7"
+      },
+      {
+        "n": 37,
+        "n_by_pos": {
+          "adj": 3,
+          "noun": 26,
+          "verb": 8
+        },
+        "stage": "after_C8"
+      }
+    ]
+  },
+  "coverage": {
+    "extension": {
+      "by_stratum": {
+        "ambiguous": {
+          "n_survived": 2,
+          "n_test": 27,
+          "percent": 7.407407407407407
+        },
+        "nonsino": {
+          "n_survived": 3,
+          "n_test": 68,
+          "percent": 4.411764705882353
+        },
+        "other_loan": {
+          "n_survived": 0,
+          "n_test": 2,
+          "percent": 0.0
+        },
+        "sino": {
+          "n_survived": 2,
+          "n_test": 26,
+          "percent": 7.6923076923076925
+        }
+      },
+      "n_survived": 7,
+      "n_test": 123
+    },
+    "main": {
+      "by_stratum": {
+        "ambiguous": {
+          "n_survived": 7,
+          "n_test": 347,
+          "percent": 2.0172910662824206
+        },
+        "nonsino": {
+          "n_survived": 10,
+          "n_test": 706,
+          "percent": 1.4164305949008498
+        },
+        "other_loan": {
+          "n_survived": 0,
+          "n_test": 1,
+          "percent": 0.0
+        },
+        "sino": {
+          "n_survived": 18,
+          "n_test": 481,
+          "percent": 3.7422037422037424
+        }
+      },
+      "n_survived": 35,
+      "n_test": 1535
+    },
+    "main_nonsino_percent": 1.4164305949008498,
+    "main_sino_percent": 3.7422037422037424
+  },
+  "demo_concept_ids": [
+    "1a9ec27bf14d",
+    "8fa44725013f",
+    "0a52c03dec8c"
+  ],
+  "demo_count_available": 3,
+  "demo_count_required": 3,
+  "demo_sources": {
+    "0a52c03dec8c": "directions",
+    "1a9ec27bf14d": "fewshot_set_1",
+    "8fa44725013f": "fewshot_set_5"
+  },
+  "dropped_old_concepts": 295,
+  "final_counts": {
+    "by_stratum": {
+      "diac": {
+        "extension": {
+          "ambiguous": 2,
+          "nonsino": 3,
+          "sino": 2
+        },
+        "main": {
+          "ambiguous": 7,
+          "nonsino": 10,
+          "sino": 18
+        }
+      },
+      "nodiac": {
+        "extension": {},
+        "main": {
+          "ambiguous": 6,
+          "nonsino": 8,
+          "sino": 16
+        }
+      }
+    },
+    "diac_records": 42,
+    "extension": 7,
+    "extension_nodiac_records": 0,
+    "main": 35,
+    "main_nodiac_records": 30,
+    "nodiac_records": 30
+  },
+  "legacy_point_c7_recheck": {
+    "C7 matched type": "target_lemma",
+    "C7 matched word": "point",
+    "NLLB English": [
+      "I said, \"Where's the bath, honey?\" I pointed down.",
+      "I said, \"Where's the bath, baby?\" I pointed down.",
+      "I said, \"Where's the shower, sweetheart?\" I pointed down.",
+      "I said, \"Where's the shower, baby?\" I pointed down.",
+      "I said, \"Where's the shower, honey?\" I pointed down."
+    ],
+    "NLLB limit hits": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    "concept_id": "7e526915ff7a",
+    "evaluated_beam_count": 1,
+    "passes_C7_only_if_contains_point": true,
+    "status": "evaluated"
+  },
+  "legacy_sample_rechecks": [
+    {
+      "C7 matched type": null,
+      "C7 matched word": null,
+      "NLLB English": null,
+      "NLLB limit hits": null,
+      "concept_id": "7e526915ff7a",
+      "en": "point",
+      "failed_rule": "C1",
+      "sample_item": "#4",
+      "survived": false,
+      "vi": "chỉ"
+    },
+    {
+      "C7 matched type": null,
+      "C7 matched word": null,
+      "NLLB English": null,
+      "NLLB limit hits": null,
+      "concept_id": "2d269b1f3740",
+      "en": "yesterday",
+      "failed_rule": "C1",
+      "sample_item": "#8",
+      "survived": false,
+      "vi": "hôm qua"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "council",
+      "NLLB English": [
+        "Security Council of the United Nations",
+        "United Nations Security Council",
+        "The United Nations Security Council",
+        "The UN Security Council",
+        "Security Council of the United Nations."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "8ce98a799f51",
+      "en": "council",
+      "failed_rule": null,
+      "sample_item": "#12",
+      "survived": true,
+      "vi": "hội đồng"
+    },
+    {
+      "C7 matched type": null,
+      "C7 matched word": null,
+      "NLLB English": null,
+      "NLLB limit hits": null,
+      "concept_id": "6fe56981765c",
+      "en": "volcano",
+      "failed_rule": "C1",
+      "sample_item": "#14",
+      "survived": false,
+      "vi": "núi lửa"
+    },
+    {
+      "C7 matched type": null,
+      "C7 matched word": null,
+      "NLLB English": null,
+      "NLLB limit hits": null,
+      "concept_id": "95ea753c6e9f",
+      "en": "virgin",
+      "failed_rule": "C2",
+      "sample_item": "#15",
+      "survived": false,
+      "vi": "trinh nữ"
+    },
+    {
+      "C7 matched type": null,
+      "C7 matched word": null,
+      "NLLB English": null,
+      "NLLB limit hits": null,
+      "concept_id": "073392b0bbf1",
+      "en": "method",
+      "failed_rule": "C2",
+      "sample_item": "#16",
+      "survived": false,
+      "vi": "phương pháp"
+    },
+    {
+      "C7 matched type": null,
+      "C7 matched word": null,
+      "NLLB English": null,
+      "NLLB limit hits": null,
+      "concept_id": "498b7cc9a880",
+      "en": "monument",
+      "failed_rule": "C7",
+      "sample_item": "#19",
+      "survived": false,
+      "vi": "tượng đài"
+    },
+    {
+      "C7 matched type": null,
+      "C7 matched word": null,
+      "NLLB English": null,
+      "NLLB limit hits": null,
+      "concept_id": "e56bd9864ba4",
+      "en": "syndrome",
+      "failed_rule": "C6",
+      "sample_item": "#22",
+      "survived": false,
+      "vi": "hội chứng"
+    }
+  ],
+  "maximum_extension_survivors": 7,
+  "maximum_main_survivors": 61,
+  "nllb": {
+    "cache_hits_delta": 73,
+    "calls_delta": 0,
+    "max_new_tokens": 256,
+    "model": "facebook/nllb-200-distilled-600M",
+    "num_beams": 5,
+    "num_return": 5,
+    "outputs": 364,
+    "requests": 73,
+    "revision": "f8d333a098d19b4fd9a8b18f94170487ad3f821d",
+    "unique_requests": 73
+  },
+  "rules": [
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "C5",
+    "C6",
+    "C7",
+    "C8"
+  ],
+  "schema_version": 1,
+  "semantic_rule": "top beam only: the untruncated top NLLB beam contains a lemmatized target lemma, two-word head lemma, or same-POS WordNet synset lemma",
+  "surviving_test_items": [
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "energy",
+      "NLLB English": [
+        "energy doesn't come on its own, it doesn't go away on its own.",
+        "energy doesn't come on its own, doesn't go away on its own.",
+        "energy doesn't come on its own, it doesn't disappear.",
+        "energy doesn't come on its own, it doesn't go away.",
+        "Energy doesn't come on its own, it doesn't go away."
+      ],
+      "concept_id": "01de8cf36697",
+      "en": "energy",
+      "en_sense_gloss": "physics",
+      "m1_extension": false,
+      "query": "___ không tự sinh ra, không tự mất đi.",
+      "stratum": "sino",
+      "vi": "năng lượng"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "matter",
+      "NLLB English": [
+        "There's matter before, there's consciousness after.",
+        "Physics comes first, consciousness comes second.",
+        "Matter comes first, consciousness comes second.",
+        "Matter comes first, consciousness comes after.",
+        "Physics comes first, consciousness comes after."
+      ],
+      "concept_id": "084518431cdb",
+      "en": "matter",
+      "en_sense_gloss": "basic structural component of the universe",
+      "m1_extension": false,
+      "query": "___ có trước, ý thức có sau.",
+      "stratum": "sino",
+      "vi": "vật chất"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "event",
+      "NLLB English": [
+        "An event that doesn't necessarily reflect the truth itself.",
+        "An event that does not necessarily reflect the truth itself.",
+        "An event that doesn't necessarily reflect reality itself.",
+        "An event that does not necessarily reflect reality itself.",
+        "An event that doesn't necessarily reflect truth in itself."
+      ],
+      "concept_id": "09030a7ca089",
+      "en": "event",
+      "en_sense_gloss": "occurrence",
+      "m1_extension": false,
+      "query": "Một ___ không nhất thiết phản ánh sự thật tự thân.",
+      "stratum": "sino",
+      "vi": "sự kiện"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "guess",
+      "NLLB English": [
+        "Oh, my God, I'm guessing like a god!",
+        "Oh, my God, I'm guessing like a god.",
+        "Oh, my God! I'm guessing like a god!",
+        "Oh, my God, I guess like me!",
+        "Oh, my God, I'm guessing like me!"
+      ],
+      "concept_id": "096fd7db1ee8",
+      "en": "guess",
+      "en_sense_gloss": "to reach an unconfirmed conclusion",
+      "m1_extension": false,
+      "query": "Trời ơi em ___ như thần!",
+      "stratum": "sino",
+      "vi": "đoán"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "give up",
+      "NLLB English": [
+        "Before the final round, the two contestants gave up.",
+        "Before the final round, two contestants gave up.",
+        "Before the final round, the two contestants had given up.",
+        "Before the final exam, the two contestants gave up.",
+        "Before the final test, the two contestants gave up."
+      ],
+      "concept_id": "0be833dd62c2",
+      "en": "give up",
+      "en_sense_gloss": "stop, quit, desist",
+      "m1_extension": false,
+      "query": "Trước vòng thi cuối cùng, hai thí sinh đã ___.",
+      "stratum": "nonsino",
+      "vi": "bỏ cuộc"
+    },
+    {
+      "C7 matched type": "wordnet_synset_lemma",
+      "C7 matched word": "fight",
+      "NLLB English": [
+        "fight for an independent and free country.",
+        "Fighting for an independent and free country.",
+        "Fight for an independent and free country.",
+        "fight for an independent and free country",
+        "Fighting for an independent and free country"
+      ],
+      "concept_id": "1299f4063bb3",
+      "en": "struggle",
+      "en_sense_gloss": "to strive, to labour in difficulty, to fight",
+      "m1_extension": false,
+      "query": "___ cho đất nước được độc lập và tự do",
+      "stratum": "sino",
+      "vi": "đấu tranh"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "zoo",
+      "NLLB English": [
+        "I'm going to the zoo to see if he's any good.",
+        "I'm going to the zoo to see if I can get a good look at this kid.",
+        "I'm going to the zoo to see if I can get a good look at him.",
+        "I'm going to the zoo to see if I can get a good look at this baby.",
+        "I'm going to the zoo to see if I can get a good look at this boy."
+      ],
+      "concept_id": "137e4b950652",
+      "en": "zoo",
+      "en_sense_gloss": "park where live animals are exhibited",
+      "m1_extension": false,
+      "query": "Ê bữa đi ___ thấy mới rinh về con này nom hay hay nè.",
+      "stratum": "nonsino",
+      "vi": "sở thú"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "happy",
+      "NLLB English": [
+        "To be happy, there must be peace.",
+        "Peace is the key to happiness.",
+        "Happiness requires peace.",
+        "To be happy, we must be at peace.",
+        "To be happy, we must have peace."
+      ],
+      "concept_id": "1feac73470f4",
+      "en": "happy",
+      "en_sense_gloss": "contented, joyous",
+      "m1_extension": false,
+      "query": "Muốn ___ thì phải có hòa bình.",
+      "stratum": "sino",
+      "vi": "hạnh phúc"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "have",
+      "NLLB English": [
+        "Do you have a pencil?",
+        "- Do you have a pencil?",
+        "You got a pencil?",
+        "Have you got a pencil?",
+        "Do you have a pen?"
+      ],
+      "concept_id": "275982ff44f1",
+      "en": "have",
+      "en_sense_gloss": "1. to possess",
+      "m1_extension": true,
+      "query": "Cậu ___ bút chì không? Cho tớ mượn.",
+      "stratum": "nonsino",
+      "vi": "có"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "translate",
+      "NLLB English": [
+        "Translate from English to Vietnamese",
+        "translated from English into Vietnamese",
+        "Translate English into Vietnamese",
+        "translated from English to Vietnamese",
+        "translated from English into Vietnamese."
+      ],
+      "concept_id": "2886de9b240a",
+      "en": "translate",
+      "en_sense_gloss": "to change spoken words or written text from one language to another",
+      "m1_extension": true,
+      "query": "___ tiếng Anh ra tiếng Việt",
+      "stratum": "sino",
+      "vi": "dịch"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "bedroom",
+      "NLLB English": [
+        "We've got to get the bedroom cleaned for dinner.",
+        "We're gonna have to clean the bedroom for dinner.",
+        "We've got to clean the bedroom for dinner.",
+        "We have to clean the bedroom for dinner.",
+        "I've got to clean the bedroom for dinner."
+      ],
+      "concept_id": "28a56624efcc",
+      "en": "bedroom",
+      "en_sense_gloss": "room in a house where a bed is kept for sleeping",
+      "m1_extension": false,
+      "query": "Bữa nay phải dọn ___ nghe chưa.",
+      "stratum": "nonsino",
+      "vi": "phòng ngủ"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "tourism",
+      "NLLB English": [
+        "tourism contributes a huge part to the city's economy.",
+        "tourism contributes a large part to the city's economy.",
+        "tourism contributes to the city's economy.",
+        "Tourism contributes to the city's economy.",
+        "tourism contributes to the city's economy in large part."
+      ],
+      "concept_id": "29515db22478",
+      "en": "tourism",
+      "en_sense_gloss": "the act of travelling or sightseeing",
+      "m1_extension": false,
+      "query": "___ đóng góp một phần không nhỏ vào kinh tế thành phố.",
+      "stratum": "sino",
+      "vi": "du lịch"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "famous",
+      "NLLB English": [
+        "The artwork of a famous musician has to give way over time.",
+        "The art of a famous musician has to give way over time.",
+        "The artwork of a famous musician has to yield over time.",
+        "The artwork of a famous musician has to give way to time.",
+        "The artwork of a famous musician has to yield to time."
+      ],
+      "concept_id": "377cd0125089",
+      "en": "famous",
+      "en_sense_gloss": "well known",
+      "m1_extension": false,
+      "query": "Chất nghệ của nhạc sĩ ___ một thời rồi cũng phải chịu thua với thời gian mà thôi.",
+      "stratum": "nonsino",
+      "vi": "nổi tiếng"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "province",
+      "NLLB English": [
+        "They are from the village of Quỳnh Nhô, Quỳnh Nhô, Quỳnh Nhô District, Nghệ An Province.",
+        "They are originally from the village of Quỳnh Nhô, Quỳnh Nhô, Quỳnh Nhô district, Nghệ An province.",
+        "They are from the village of Quỳnh Nhô, Quỳnh Nhô, Quỳnh Nhô district, Nghệ An province.",
+        "They are originally from the village of Quỳnh Nhô, Quỳnh Nhô, Quỳnh Nhô, Nghệ An Province.",
+        "They are from the village of Quỳnh Nhô, Quỳnh Nhô, Quỳnh Nhô district, Nghệ An Province."
+      ],
+      "concept_id": "3f42cf2315a1",
+      "en": "province",
+      "en_sense_gloss": "a subdivision of government usually one step below the national level",
+      "m1_extension": true,
+      "query": "Họ Hồ có nguồn gốc từ làng Quỳnh Đôi, xã Quỳnh Đôi, huyện Quỳnh Đôi, ___ Nghệ An.",
+      "stratum": "sino",
+      "vi": "tỉnh"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "spy",
+      "NLLB English": [
+        "The half-season spy has been arrested.",
+        "Half-season spy has been arrested.",
+        "The half-hour spy has been arrested.",
+        "The midseason spy has been arrested.",
+        "Half-season spy has been caught."
+      ],
+      "concept_id": "5bb4f96f9de1",
+      "en": "spy",
+      "en_sense_gloss": "person who secretly watches",
+      "m1_extension": false,
+      "query": "tên ___ nửa mùa đã bị bắt",
+      "stratum": "sino",
+      "vi": "gián điệp"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "shave",
+      "NLLB English": [
+        "Cut two dozen hairs, shave the face with an extra 10,000 earplugs, a total of three dozen.",
+        "Cut two dozen hairs, shave your face with an extra 10,000 earplugs, a total of three dozen.",
+        "Cut two dozen hairs, shave your face with 10,000 earplugs, a total of three dozen.",
+        "Cut two dozen hairs, shave your face with an extra 10,000 earplugs.",
+        "Cut two dozen hairs, shave the face with an extra 10,000 earplugs."
+      ],
+      "concept_id": "5c49317dae40",
+      "en": "shave",
+      "en_sense_gloss": "to remove hair from",
+      "m1_extension": true,
+      "query": "Cắt tóc hết 2 chục. ___ mặt với lấy ráy tai thêm 10 nghìn. Tổng cộng 3 chục.",
+      "stratum": "nonsino",
+      "vi": "cạo"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "characteristic",
+      "NLLB English": [
+        "The climatic characteristics of a region.",
+        "The climatic characteristics of an area.",
+        "The climate characteristics of a region.",
+        "The climatic features of a region.",
+        "Climate characteristics of a region."
+      ],
+      "concept_id": "63507868e649",
+      "en": "characteristic",
+      "en_sense_gloss": "distinguishing feature",
+      "m1_extension": false,
+      "query": "Những ___ khí hậu của một vùng.",
+      "stratum": "sino",
+      "vi": "đặc điểm"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "president",
+      "NLLB English": [
+        "President of the Republic of Vietnam",
+        "president of the Republic of Vietnam",
+        "the President of the Republic of Vietnam",
+        "the president of the Republic of Vietnam",
+        "President of the Republic of Vietnam."
+      ],
+      "concept_id": "696c27bf53a8",
+      "en": "president",
+      "en_sense_gloss": "the head of state of a republic",
+      "m1_extension": false,
+      "query": "___ của Việt Nam Cộng hoà",
+      "stratum": "sino",
+      "vi": "tổng thống"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "long-term",
+      "NLLB English": [
+        "a long-term training program",
+        "a long-term training program.",
+        "a long-term training programme",
+        "A long-term training program",
+        "a long term training program"
+      ],
+      "concept_id": "6bd2faab1902",
+      "en": "long-term",
+      "en_sense_gloss": "extending over a relatively long time period",
+      "m1_extension": false,
+      "query": "một chương trình đào tạo ___",
+      "stratum": "nonsino",
+      "vi": "dài hạn"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "snore",
+      "NLLB English": [
+        "It's unusual for children to snore like that.",
+        "It's unusual for a child to snore like that.",
+        "It's not unusual for children to snore like that.",
+        "Kids who snore like that are unusual.",
+        "Children who snore like that are unusual."
+      ],
+      "concept_id": "6f8c555311b9",
+      "en": "snore",
+      "en_sense_gloss": "breathe during sleep with harsh noises",
+      "m1_extension": false,
+      "query": "Trẻ con mà ___ như vậy thì khác thường quá.",
+      "stratum": "nonsino",
+      "vi": "ngáy"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "fascism",
+      "NLLB English": [
+        "Fascism is the enemy of humanity.",
+        "Nazism is the enemy of humanity.",
+        "Fascism is the enemy of mankind.",
+        "Fascism is an enemy of humanity.",
+        "Nazism is the enemy of mankind."
+      ],
+      "concept_id": "703f28666826",
+      "en": "fascism",
+      "en_sense_gloss": "extreme totalitarian political regime",
+      "m1_extension": false,
+      "query": "___ là kẻ thù của nhân loại.",
+      "stratum": "nonsino",
+      "vi": "chủ nghĩa phát xít"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "capital",
+      "NLLB English": [
+        "It's hard to start a business without capital.",
+        "Without capital, it's hard to start a business.",
+        "Without capital, it's hard to start.",
+        "It's hard to start a startup without capital.",
+        "It's hard to start a business without money."
+      ],
+      "concept_id": "71984179fa6d",
+      "en": "capital",
+      "en_sense_gloss": "money and wealth",
+      "m1_extension": true,
+      "query": "Không có ___ thì khó mà khởi nghiệp.",
+      "stratum": "ambiguous",
+      "vi": "vốn"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "future",
+      "NLLB English": [
+        "Children are the future of our country.",
+        "Children are the future of the country.",
+        "Children are the future of this country.",
+        "The children are the future of the country.",
+        "Children are the future of our nation."
+      ],
+      "concept_id": "73d3ad4069c4",
+      "en": "future",
+      "en_sense_gloss": "the time ahead",
+      "m1_extension": false,
+      "query": "Trẻ em là ___ của đất nước.",
+      "stratum": "sino",
+      "vi": "tương lai"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "cockroach",
+      "NLLB English": [
+        "There are four transmitting species: flies, mosquitoes, cockroaches, mice.",
+        "There are four types of transmitters: flies, mosquitoes, cockroaches, mice.",
+        "There are four species of transmitters: flies, mosquitoes, cockroaches, mice.",
+        "There are four species that transmit the disease: flies, mosquitoes, cockroaches, mice.",
+        "There are four transmitting species: flies, mosquitoes, cockroaches, rats."
+      ],
+      "concept_id": "7d62efb774af",
+      "en": "cockroach",
+      "en_sense_gloss": "type of insect",
+      "m1_extension": true,
+      "query": "bốn loài trung gian truyền bệnh: ruồi, muỗi, ___, chuột",
+      "stratum": "nonsino",
+      "vi": "gián"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "helmet",
+      "NLLB English": [
+        "Wear a helmet when riding motorcycles, motorcycles.",
+        "Wear helmets when riding motorcycles, motorcycles.",
+        "Wear a helmet when riding motorcycles, motorcycles",
+        "Wear helmets when riding motorcycles, motorcycles",
+        "Wear a helmet when riding a motorcycle, motorcycle."
+      ],
+      "concept_id": "82175198eece",
+      "en": "helmet",
+      "en_sense_gloss": "protective head covering",
+      "m1_extension": false,
+      "query": "đội ___ khi đi xe mô-tô, xe gắn máy",
+      "stratum": "nonsino",
+      "vi": "mũ bảo hiểm"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "council",
+      "NLLB English": [
+        "Security Council of the United Nations",
+        "United Nations Security Council",
+        "The United Nations Security Council",
+        "The UN Security Council",
+        "Security Council of the United Nations."
+      ],
+      "concept_id": "8ce98a799f51",
+      "en": "council",
+      "en_sense_gloss": "committee that leads or governs",
+      "m1_extension": false,
+      "query": "___ Bảo an Liên hợp quốc",
+      "stratum": "sino",
+      "vi": "hội đồng"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "sunset",
+      "NLLB English": [
+        "At sunset, tomorrow's outside the fields.",
+        "At sunset, tomorrow's outside the field.",
+        "At sunset, tomorrow is outside the field.",
+        "At sunset, tomorrow's on the beach.",
+        "At sunset, tomorrow's out on the field."
+      ],
+      "concept_id": "91b44568ce9d",
+      "en": "sunset",
+      "en_sense_gloss": "time of day",
+      "m1_extension": false,
+      "query": "___, Mai ở ngoài bờ ruộng.",
+      "stratum": "sino",
+      "vi": "hoàng hôn"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "propaganda",
+      "NLLB English": [
+        "Is television a propaganda tool or not?",
+        "Is the television a propaganda tool or not?",
+        "Is the TV a propaganda tool or not?",
+        "Is the television a propaganda device or not?",
+        "Is television a propaganda device or not?"
+      ],
+      "concept_id": "934d4042731a",
+      "en": "propaganda",
+      "en_sense_gloss": "concerted set of messages",
+      "m1_extension": false,
+      "query": "Ti vi có phải là công cụ ___ hay không?",
+      "stratum": "sino",
+      "vi": "tuyên truyền"
+    },
+    {
+      "C7 matched type": "wordnet_synset_lemma",
+      "C7 matched word": "devil",
+      "NLLB English": [
+        "First the devil, second the ghost, third the student.",
+        "First the demon, second the demon, third the student.",
+        "First the demon, second the ghost, third the student.",
+        "First the devil, second the ghost, third the pupil.",
+        "First the devil, second the ghost, and third the student."
+      ],
+      "concept_id": "a5e8aa469f67",
+      "en": "demon",
+      "en_sense_gloss": "evil being",
+      "m1_extension": false,
+      "query": "nhất ___, nhì ma, thứ ba học trò",
+      "stratum": "sino",
+      "vi": "quỷ"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "confiscate",
+      "NLLB English": [
+        "When I was in school, I brought my phone to class so my teacher would know it was confiscated.",
+        "When I was in school, I brought my phone to class so my teacher could see it was confiscated.",
+        "When I was in school, I brought my phone to the classroom so the teacher could see it was confiscated.",
+        "When I was in school, I brought my phone to the classroom so the teacher would know it was confiscated.",
+        "When I was in school, I brought my phone to class so that my teacher would know it was confiscated."
+      ],
+      "concept_id": "a734dc647ae3",
+      "en": "confiscate",
+      "en_sense_gloss": "take possession of by authority",
+      "m1_extension": false,
+      "query": "Hồi anh còn đi học, mang điện thoại lên lớp mà để thầy cô thấy là bị ___ liền.",
+      "stratum": "ambiguous",
+      "vi": "tịch thu"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "association",
+      "NLLB English": [
+        "Association of Southeast Asian Nations",
+        "The Association of Southeast Asian Nations",
+        "the Association of Southeast Asian Nations",
+        "association of Southeast Asian nations",
+        "Association of Southeast Asian Nations."
+      ],
+      "concept_id": "a8a2c97fb1ee",
+      "en": "association",
+      "en_sense_gloss": "group of persons associated for a common purpose",
+      "m1_extension": false,
+      "query": "___ các Quốc gia Đông Nam Á",
+      "stratum": "sino",
+      "vi": "hiệp hội"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "like",
+      "NLLB English": [
+        "You Asian who doesn't like rice!?",
+        "You Asian who doesn't like rice?",
+        "Are you an Asian who doesn't like rice?",
+        "Are you an Asian who doesn't like rice!?",
+        "You Asian who doesn't like rice!"
+      ],
+      "concept_id": "a8d086d89e72",
+      "en": "like",
+      "en_sense_gloss": "to find attractive",
+      "m1_extension": false,
+      "query": "Mày người châu Á mà không ___ cơm à!?",
+      "stratum": "ambiguous",
+      "vi": "thích"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "goddess",
+      "NLLB English": [
+        "Five prayers to the sun goddess.",
+        "Five prayers for the sun goddess.",
+        "Praying for the sun goddess.",
+        "Praying to the sun goddess.",
+        "Praying for the Sun Goddess."
+      ],
+      "concept_id": "afda83173ec0",
+      "en": "goddess",
+      "en_sense_gloss": "female deity",
+      "m1_extension": false,
+      "query": "Đăm Săn cầu hôn ___ mặt trời.",
+      "stratum": "ambiguous",
+      "vi": "nữ thần"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "uniform",
+      "NLLB English": [
+        "Third graders have to wear uniforms every Tuesday, and boys wear them as usual.",
+        "Third graders wear uniforms every Tuesday, and boys wear them as usual.",
+        "Third graders have to wear uniforms every Tuesday.",
+        "Third graders have to wear uniforms every Tuesday, boys still wear them as usual.",
+        "Third graders have to wear uniforms every Tuesday, and boys still wear them."
+      ],
+      "concept_id": "b8ceeb76237f",
+      "en": "uniform",
+      "en_sense_gloss": "distinctive outfit as a means of identifying members of a group",
+      "m1_extension": false,
+      "query": "Nữ sinh cấp 3 phải mặc ___ áo dài mỗi thứ 2. Nam sinh vẫn mặc như thường.",
+      "stratum": "ambiguous",
+      "vi": "đồng phục"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "safety",
+      "NLLB English": [
+        "Safety is your friend, accidents are your enemy.",
+        "Safety is a friend, accidents are an enemy.",
+        "Safety is your friend, accident is your enemy.",
+        "Safety is a friend, accident is an enemy.",
+        "Safety is a friend, accidents are a foe."
+      ],
+      "concept_id": "bbf7dd03c307",
+      "en": "safety",
+      "en_sense_gloss": "condition or feeling of being safe",
+      "m1_extension": false,
+      "query": "___ là bạn, tai nạn là thù.",
+      "stratum": "sino",
+      "vi": "an toàn"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "sovereignty",
+      "NLLB English": [
+        "respect for the sovereignty of a country",
+        "respecting the sovereignty of a country",
+        "Respect for the sovereignty of a country",
+        "respect for a nation's sovereignty",
+        "respect the sovereignty of a country"
+      ],
+      "concept_id": "db5be5128a72",
+      "en": "sovereignty",
+      "en_sense_gloss": "of a nation or other polity: the state of being able to control resources, make laws independently, and otherwise govern itself without the coercion or concurrence of other polities",
+      "m1_extension": false,
+      "query": "tôn trọng ___ của một nước",
+      "stratum": "ambiguous",
+      "vi": "chủ quyền"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "subtitle",
+      "NLLB English": [
+        "This video has subtitles in over a dozen languages.",
+        "This video has subtitles in more than a dozen languages.",
+        "This video is subtitled in over a dozen languages.",
+        "This video is subtitled in more than a dozen languages.",
+        "This video has more than a dozen subtitles."
+      ],
+      "concept_id": "dd3f6437098f",
+      "en": "subtitle",
+      "en_sense_gloss": "textual versions of the dialog in films",
+      "m1_extension": false,
+      "query": "Cái video này có ___ hơn chục thứ tiếng.",
+      "stratum": "ambiguous",
+      "vi": "phụ đề"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "wrong",
+      "NLLB English": [
+        "I know you're wrong, I hope you forgive me.",
+        "I know you're wrong, I hope you'll forgive me.",
+        "I know you're wrong. I hope you forgive me.",
+        "I know I'm wrong, I hope you forgive me.",
+        "I know you're wrong, and I hope you forgive me."
+      ],
+      "concept_id": "ee5fcbda4085",
+      "en": "wrong",
+      "en_sense_gloss": "incorrect",
+      "m1_extension": true,
+      "query": "Em biết em ___, mong anh tha thứ.",
+      "stratum": "ambiguous",
+      "vi": "sai"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "hobby",
+      "NLLB English": [
+        "My hobbies are fishing, cycling, and reading comic books.",
+        "My hobbies are fishing, cycling, and reading comics.",
+        "My hobbies are fishing, cycling and reading comic books.",
+        "My hobbies are fishing, cycling and reading comics.",
+        "My hobbies are fishing, biking, and reading comics."
+      ],
+      "concept_id": "f135f6c6ed4c",
+      "en": "hobby",
+      "en_sense_gloss": "activity done for enjoyment in spare time",
+      "m1_extension": false,
+      "query": "___ của mình là câu cá, đạp xe và đọc truyện tranh.",
+      "stratum": "ambiguous",
+      "vi": "sở thích"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "skeleton",
+      "NLLB English": [
+        "It's a known skeleton.",
+        "It's just a skeleton, you know.",
+        "It's just a skeleton that knows.",
+        "It's a skeleton that knows.",
+        "It's just a skeleton that knows it."
+      ],
+      "concept_id": "f31e136eb325",
+      "en": "skeleton",
+      "en_sense_gloss": "system that provides support to an organism",
+      "m1_extension": false,
+      "query": "Lão hành khất đúng là một ___ biết đi.",
+      "stratum": "nonsino",
+      "vi": "bộ xương"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "wavelength",
+      "NLLB English": [
+        "the wavelength by the rate of wave propagation divided by the frequency.",
+        "the wavelength by the speed of the wave propagation divided by the frequency.",
+        "the wavelength by the rate of wave propagation divided by frequency.",
+        "the wavelength by the frequency of the wave propagation divided by the frequency.",
+        "the wavelength by the speed of the wave propagation divided by frequency."
+      ],
+      "concept_id": "f3ba5c0cfc5e",
+      "en": "wavelength",
+      "en_sense_gloss": "the length of a single cycle of a wave",
+      "m1_extension": false,
+      "query": "___ bằng vận tốc truyền sóng chia cho tần số.",
+      "stratum": "nonsino",
+      "vi": "bước sóng"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "goal",
+      "NLLB English": [
+        "The chessmen missed the first goal.",
+        "The shooter missed the first shot.",
+        "The champion missed the first shot.",
+        "The shooter missed the first target.",
+        "Chessmen missed the first shot."
+      ],
+      "concept_id": "fec047a4ea9f",
+      "en": "goal",
+      "en_sense_gloss": "result one is attempting to achieve",
+      "m1_extension": false,
+      "query": "Xạ thủ đã bắn trượt ___ đầu tiên.",
+      "stratum": "sino",
+      "vi": "mục tiêu"
+    }
+  ],
+  "survivor_sample": [
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "spy",
+      "NLLB English": [
+        "The half-season spy has been arrested.",
+        "Half-season spy has been arrested.",
+        "The half-hour spy has been arrested.",
+        "The midseason spy has been arrested.",
+        "Half-season spy has been caught."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "5bb4f96f9de1",
+      "en": "spy",
+      "en_sense_gloss": "person who secretly watches",
+      "m1_extension": false,
+      "query": "tên ___ nửa mùa đã bị bắt",
+      "stratum": "sino",
+      "vi": "gián điệp"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "famous",
+      "NLLB English": [
+        "The artwork of a famous musician has to give way over time.",
+        "The art of a famous musician has to give way over time.",
+        "The artwork of a famous musician has to yield over time.",
+        "The artwork of a famous musician has to give way to time.",
+        "The artwork of a famous musician has to yield to time."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "377cd0125089",
+      "en": "famous",
+      "en_sense_gloss": "well known",
+      "m1_extension": false,
+      "query": "Chất nghệ của nhạc sĩ ___ một thời rồi cũng phải chịu thua với thời gian mà thôi.",
+      "stratum": "nonsino",
+      "vi": "nổi tiếng"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "helmet",
+      "NLLB English": [
+        "Wear a helmet when riding motorcycles, motorcycles.",
+        "Wear helmets when riding motorcycles, motorcycles.",
+        "Wear a helmet when riding motorcycles, motorcycles",
+        "Wear helmets when riding motorcycles, motorcycles",
+        "Wear a helmet when riding a motorcycle, motorcycle."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "82175198eece",
+      "en": "helmet",
+      "en_sense_gloss": "protective head covering",
+      "m1_extension": false,
+      "query": "đội ___ khi đi xe mô-tô, xe gắn máy",
+      "stratum": "nonsino",
+      "vi": "mũ bảo hiểm"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "wavelength",
+      "NLLB English": [
+        "the wavelength by the rate of wave propagation divided by the frequency.",
+        "the wavelength by the speed of the wave propagation divided by the frequency.",
+        "the wavelength by the rate of wave propagation divided by frequency.",
+        "the wavelength by the frequency of the wave propagation divided by the frequency.",
+        "the wavelength by the speed of the wave propagation divided by frequency."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "f3ba5c0cfc5e",
+      "en": "wavelength",
+      "en_sense_gloss": "the length of a single cycle of a wave",
+      "m1_extension": false,
+      "query": "___ bằng vận tốc truyền sóng chia cho tần số.",
+      "stratum": "nonsino",
+      "vi": "bước sóng"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "sovereignty",
+      "NLLB English": [
+        "respect for the sovereignty of a country",
+        "respecting the sovereignty of a country",
+        "Respect for the sovereignty of a country",
+        "respect for a nation's sovereignty",
+        "respect the sovereignty of a country"
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "db5be5128a72",
+      "en": "sovereignty",
+      "en_sense_gloss": "of a nation or other polity: the state of being able to control resources, make laws independently, and otherwise govern itself without the coercion or concurrence of other polities",
+      "m1_extension": false,
+      "query": "tôn trọng ___ của một nước",
+      "stratum": "ambiguous",
+      "vi": "chủ quyền"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "president",
+      "NLLB English": [
+        "President of the Republic of Vietnam",
+        "president of the Republic of Vietnam",
+        "the President of the Republic of Vietnam",
+        "the president of the Republic of Vietnam",
+        "President of the Republic of Vietnam."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "696c27bf53a8",
+      "en": "president",
+      "en_sense_gloss": "the head of state of a republic",
+      "m1_extension": false,
+      "query": "___ của Việt Nam Cộng hoà",
+      "stratum": "sino",
+      "vi": "tổng thống"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "province",
+      "NLLB English": [
+        "They are from the village of Quỳnh Nhô, Quỳnh Nhô, Quỳnh Nhô District, Nghệ An Province.",
+        "They are originally from the village of Quỳnh Nhô, Quỳnh Nhô, Quỳnh Nhô district, Nghệ An province.",
+        "They are from the village of Quỳnh Nhô, Quỳnh Nhô, Quỳnh Nhô district, Nghệ An province.",
+        "They are originally from the village of Quỳnh Nhô, Quỳnh Nhô, Quỳnh Nhô, Nghệ An Province.",
+        "They are from the village of Quỳnh Nhô, Quỳnh Nhô, Quỳnh Nhô district, Nghệ An Province."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "3f42cf2315a1",
+      "en": "province",
+      "en_sense_gloss": "a subdivision of government usually one step below the national level",
+      "m1_extension": true,
+      "query": "Họ Hồ có nguồn gốc từ làng Quỳnh Đôi, xã Quỳnh Đôi, huyện Quỳnh Đôi, ___ Nghệ An.",
+      "stratum": "sino",
+      "vi": "tỉnh"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "propaganda",
+      "NLLB English": [
+        "Is television a propaganda tool or not?",
+        "Is the television a propaganda tool or not?",
+        "Is the TV a propaganda tool or not?",
+        "Is the television a propaganda device or not?",
+        "Is television a propaganda device or not?"
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "934d4042731a",
+      "en": "propaganda",
+      "en_sense_gloss": "concerted set of messages",
+      "m1_extension": false,
+      "query": "Ti vi có phải là công cụ ___ hay không?",
+      "stratum": "sino",
+      "vi": "tuyên truyền"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "goal",
+      "NLLB English": [
+        "The chessmen missed the first goal.",
+        "The shooter missed the first shot.",
+        "The champion missed the first shot.",
+        "The shooter missed the first target.",
+        "Chessmen missed the first shot."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "fec047a4ea9f",
+      "en": "goal",
+      "en_sense_gloss": "result one is attempting to achieve",
+      "m1_extension": false,
+      "query": "Xạ thủ đã bắn trượt ___ đầu tiên.",
+      "stratum": "sino",
+      "vi": "mục tiêu"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "zoo",
+      "NLLB English": [
+        "I'm going to the zoo to see if he's any good.",
+        "I'm going to the zoo to see if I can get a good look at this kid.",
+        "I'm going to the zoo to see if I can get a good look at him.",
+        "I'm going to the zoo to see if I can get a good look at this baby.",
+        "I'm going to the zoo to see if I can get a good look at this boy."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "137e4b950652",
+      "en": "zoo",
+      "en_sense_gloss": "park where live animals are exhibited",
+      "m1_extension": false,
+      "query": "Ê bữa đi ___ thấy mới rinh về con này nom hay hay nè.",
+      "stratum": "nonsino",
+      "vi": "sở thú"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "event",
+      "NLLB English": [
+        "An event that doesn't necessarily reflect the truth itself.",
+        "An event that does not necessarily reflect the truth itself.",
+        "An event that doesn't necessarily reflect reality itself.",
+        "An event that does not necessarily reflect reality itself.",
+        "An event that doesn't necessarily reflect truth in itself."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "09030a7ca089",
+      "en": "event",
+      "en_sense_gloss": "occurrence",
+      "m1_extension": false,
+      "query": "Một ___ không nhất thiết phản ánh sự thật tự thân.",
+      "stratum": "sino",
+      "vi": "sự kiện"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "cockroach",
+      "NLLB English": [
+        "There are four transmitting species: flies, mosquitoes, cockroaches, mice.",
+        "There are four types of transmitters: flies, mosquitoes, cockroaches, mice.",
+        "There are four species of transmitters: flies, mosquitoes, cockroaches, mice.",
+        "There are four species that transmit the disease: flies, mosquitoes, cockroaches, mice.",
+        "There are four transmitting species: flies, mosquitoes, cockroaches, rats."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "7d62efb774af",
+      "en": "cockroach",
+      "en_sense_gloss": "type of insect",
+      "m1_extension": true,
+      "query": "bốn loài trung gian truyền bệnh: ruồi, muỗi, ___, chuột",
+      "stratum": "nonsino",
+      "vi": "gián"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "safety",
+      "NLLB English": [
+        "Safety is your friend, accidents are your enemy.",
+        "Safety is a friend, accidents are an enemy.",
+        "Safety is your friend, accident is your enemy.",
+        "Safety is a friend, accident is an enemy.",
+        "Safety is a friend, accidents are a foe."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "bbf7dd03c307",
+      "en": "safety",
+      "en_sense_gloss": "condition or feeling of being safe",
+      "m1_extension": false,
+      "query": "___ là bạn, tai nạn là thù.",
+      "stratum": "sino",
+      "vi": "an toàn"
+    },
+    {
+      "C7 matched type": "wordnet_synset_lemma",
+      "C7 matched word": "devil",
+      "NLLB English": [
+        "First the devil, second the ghost, third the student.",
+        "First the demon, second the demon, third the student.",
+        "First the demon, second the ghost, third the student.",
+        "First the devil, second the ghost, third the pupil.",
+        "First the devil, second the ghost, and third the student."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "a5e8aa469f67",
+      "en": "demon",
+      "en_sense_gloss": "evil being",
+      "m1_extension": false,
+      "query": "nhất ___, nhì ma, thứ ba học trò",
+      "stratum": "sino",
+      "vi": "quỷ"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "skeleton",
+      "NLLB English": [
+        "It's a known skeleton.",
+        "It's just a skeleton, you know.",
+        "It's just a skeleton that knows.",
+        "It's a skeleton that knows.",
+        "It's just a skeleton that knows it."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "f31e136eb325",
+      "en": "skeleton",
+      "en_sense_gloss": "system that provides support to an organism",
+      "m1_extension": false,
+      "query": "Lão hành khất đúng là một ___ biết đi.",
+      "stratum": "nonsino",
+      "vi": "bộ xương"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "long-term",
+      "NLLB English": [
+        "a long-term training program",
+        "a long-term training program.",
+        "a long-term training programme",
+        "A long-term training program",
+        "a long term training program"
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "6bd2faab1902",
+      "en": "long-term",
+      "en_sense_gloss": "extending over a relatively long time period",
+      "m1_extension": false,
+      "query": "một chương trình đào tạo ___",
+      "stratum": "nonsino",
+      "vi": "dài hạn"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "association",
+      "NLLB English": [
+        "Association of Southeast Asian Nations",
+        "The Association of Southeast Asian Nations",
+        "the Association of Southeast Asian Nations",
+        "association of Southeast Asian nations",
+        "Association of Southeast Asian Nations."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "a8a2c97fb1ee",
+      "en": "association",
+      "en_sense_gloss": "group of persons associated for a common purpose",
+      "m1_extension": false,
+      "query": "___ các Quốc gia Đông Nam Á",
+      "stratum": "sino",
+      "vi": "hiệp hội"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "future",
+      "NLLB English": [
+        "Children are the future of our country.",
+        "Children are the future of the country.",
+        "Children are the future of this country.",
+        "The children are the future of the country.",
+        "Children are the future of our nation."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "73d3ad4069c4",
+      "en": "future",
+      "en_sense_gloss": "the time ahead",
+      "m1_extension": false,
+      "query": "Trẻ em là ___ của đất nước.",
+      "stratum": "sino",
+      "vi": "tương lai"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "capital",
+      "NLLB English": [
+        "It's hard to start a business without capital.",
+        "Without capital, it's hard to start a business.",
+        "Without capital, it's hard to start.",
+        "It's hard to start a startup without capital.",
+        "It's hard to start a business without money."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "71984179fa6d",
+      "en": "capital",
+      "en_sense_gloss": "money and wealth",
+      "m1_extension": true,
+      "query": "Không có ___ thì khó mà khởi nghiệp.",
+      "stratum": "ambiguous",
+      "vi": "vốn"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "subtitle",
+      "NLLB English": [
+        "This video has subtitles in over a dozen languages.",
+        "This video has subtitles in more than a dozen languages.",
+        "This video is subtitled in over a dozen languages.",
+        "This video is subtitled in more than a dozen languages.",
+        "This video has more than a dozen subtitles."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "dd3f6437098f",
+      "en": "subtitle",
+      "en_sense_gloss": "textual versions of the dialog in films",
+      "m1_extension": false,
+      "query": "Cái video này có ___ hơn chục thứ tiếng.",
+      "stratum": "ambiguous",
+      "vi": "phụ đề"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "snore",
+      "NLLB English": [
+        "It's unusual for children to snore like that.",
+        "It's unusual for a child to snore like that.",
+        "It's not unusual for children to snore like that.",
+        "Kids who snore like that are unusual.",
+        "Children who snore like that are unusual."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "6f8c555311b9",
+      "en": "snore",
+      "en_sense_gloss": "breathe during sleep with harsh noises",
+      "m1_extension": false,
+      "query": "Trẻ con mà ___ như vậy thì khác thường quá.",
+      "stratum": "nonsino",
+      "vi": "ngáy"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "characteristic",
+      "NLLB English": [
+        "The climatic characteristics of a region.",
+        "The climatic characteristics of an area.",
+        "The climate characteristics of a region.",
+        "The climatic features of a region.",
+        "Climate characteristics of a region."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "63507868e649",
+      "en": "characteristic",
+      "en_sense_gloss": "distinguishing feature",
+      "m1_extension": false,
+      "query": "Những ___ khí hậu của một vùng.",
+      "stratum": "sino",
+      "vi": "đặc điểm"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "tourism",
+      "NLLB English": [
+        "tourism contributes a huge part to the city's economy.",
+        "tourism contributes a large part to the city's economy.",
+        "tourism contributes to the city's economy.",
+        "Tourism contributes to the city's economy.",
+        "tourism contributes to the city's economy in large part."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "29515db22478",
+      "en": "tourism",
+      "en_sense_gloss": "the act of travelling or sightseeing",
+      "m1_extension": false,
+      "query": "___ đóng góp một phần không nhỏ vào kinh tế thành phố.",
+      "stratum": "sino",
+      "vi": "du lịch"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "bedroom",
+      "NLLB English": [
+        "We've got to get the bedroom cleaned for dinner.",
+        "We're gonna have to clean the bedroom for dinner.",
+        "We've got to clean the bedroom for dinner.",
+        "We have to clean the bedroom for dinner.",
+        "I've got to clean the bedroom for dinner."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "28a56624efcc",
+      "en": "bedroom",
+      "en_sense_gloss": "room in a house where a bed is kept for sleeping",
+      "m1_extension": false,
+      "query": "Bữa nay phải dọn ___ nghe chưa.",
+      "stratum": "nonsino",
+      "vi": "phòng ngủ"
+    },
+    {
+      "C7 matched type": "target_lemma",
+      "C7 matched word": "fascism",
+      "NLLB English": [
+        "Fascism is the enemy of humanity.",
+        "Nazism is the enemy of humanity.",
+        "Fascism is the enemy of mankind.",
+        "Fascism is an enemy of humanity.",
+        "Nazism is the enemy of mankind."
+      ],
+      "NLLB limit hits": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "concept_id": "703f28666826",
+      "en": "fascism",
+      "en_sense_gloss": "extreme totalitarian political regime",
+      "m1_extension": false,
+      "query": "___ là kẻ thù của nhân loại.",
+      "stratum": "nonsino",
+      "vi": "chủ nghĩa phát xít"
+    }
+  ],
+  "survivor_sample_seed": 20260925,
+  "within_previous_upper_bounds": true
+}

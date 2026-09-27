@@ -105,48 +105,87 @@ v1.2 (2026-09-26; pre-data; no model outputs exist at the time of this amendment
   d = +0.89 (Vietnamese frequency), +0.83 (Chinese frequency), −0.83
   (concreteness), −0.62 (Vietnamese tokens).
 
-### v1.3 cloze withdrawal (2026-09-27; before any study-LLM run)
+### v1.3 cloze rebuild (2026-09-27; before any study-LLM run)
 
-- **Decision:** v1.3 withdraws the cloze format before any study-LLM run.
-  The v1.2 audit found: 239/337 queries with four or fewer whitespace tokens;
-  11 query strings shared by 30 concepts with different targets; four
-  multiline queries; five queries repeating the target unblanked; four
-  queries with bracket or parenthesis markup; and a defective third
-  demonstration (`console thuộc ___ thứ 3` → `thế hệ`).
-- **Rebuild funnel:** counts are example candidates, not concepts.
+- **Decision:** v1.3 keeps the rebuilt cloze files as supplementary,
+  descriptive data, before any study-LLM run. The v1.2 cloze files remain at
+  tag `v1.2` for provenance and are not used by any analysis.
+- **Evidence from the v1.2 audit:** 239 of 337 queries have four or fewer
+  tokens; 11 prompt strings are shared by 30 concepts with different targets;
+  four queries are multiline; five queries repeat the target unblanked; four
+  queries contain bracket markup; and the third demonstration is defective
+  (`console thuộc ___ thứ 3` → `thế hệ`).
+- **First rebuild and upper bound:** the initial stricter-rule run yielded 61
+  main concepts and five extension concepts, with main coverage of 6.0% sino
+  (29/481) and 2.8% nonsino (20/706); the other 12 main survivors were
+  ambiguous. The 61 main count was an upper bound, not the final v1.3 main
+  count. The initial five extension concepts were not an upper bound: fixing
+  NLLB truncation allowed three additional extension concepts to pass.
+  The audit found that examples for items 15 (`trinh nữ`) and 16
+  (`phương pháp`) include citations and English translations, exposing the
+  English targets in the prompts and making C7 pass trivially. Items 4
+  (`chỉ`/point), 19 (`tượng đài`/monument), and 22 (`hội chứng`/syndrome)
+  passed C7 although the reported NLLB output lacked the target; NLLB outputs
+  were also truncated mid-sentence. Item 8 (`hôm qua`) is a multiline verse
+  that passed C2 after newlines were joined. C6's one-neighbour check lets
+  fixed multi-word terms pass, including items 12 (`hội đồng`) and 22
+  (`hội chứng`).
+- **Rebuild rules:** C1 uses only Wiktionary usage-example `text` values from
+  aligned senses, excluding examples with `ref` and quotations; it never joins
+  citation or translation fields. C2 rejects raw line breaks before cleanup.
+  C4 counts letter-bearing tokens plus the blank and requires six. C5b rejects
+  letter-bearing non-Vietnamese query tokens. C6 searches contiguous
+  headword windows containing the fill and at least one neighbouring
+  syllable, up to the longest headword. C7 rejects token-limit hits and checks
+  the untruncated top beam only for the target lemma, the permitted two-word
+  head lemma, or a same-POS WordNet lemma. The truncation fix re-admitted
+  `tỉnh` (`3f42cf2315a1`), `gián` (`7d62efb774af`), and `tịch thu`
+  (`a734dc647ae3`).
+- **C8 context rule:** C8 is displayed last in the funnel but is computed
+  against all candidates that pass C3 with a valid blank, before C4–C7. It
+  rejects identical queries with different Vietnamese fills; identical
+  Vietnamese fills are sense collisions and are left for C7. For example,
+  `xã hội chủ nghĩa` (`a5fcf428ddad`) is rejected because its query also
+  occurs for `chủ nghĩa xã hội` (`f22472e471f9`), even though the latter
+  candidate fails C7.
+- **Final candidate funnel:** counts are example candidates, not concepts.
 
   | Stage | Main | Extension |
   |---|---:|---:|
   | Candidates | 462 | 199 |
-  | After C1 | 456 | 100 |
-  | After C2 | 456 | 100 |
-  | After C3 | 396 | 95 |
-  | After C4 | 130 | 12 |
-  | After C5 | 107 | 10 |
-  | After C6 | 107 | 10 |
-  | After C7 | 68 | 5 |
-  | After C8 | 66 | 5 |
+  | After C1 | 382 | 93 |
+  | After C2 | 351 | 92 |
+  | After C3 | 336 | 92 |
+  | After C4 | 67 | 9 |
+  | After C5 | 59 | 9 |
+  | After C6 | 58 | 9 |
+  | After C7 | 38 | 7 |
+  | After C8 | 37 | 7 |
 
-- Deterministic example selection yielded 61 main concepts and 5 extension
-  concepts. Main-set coverage was 6.0% sino (29/481) and 2.8% nonsino
-  (20/706); the other 12 main survivors were ambiguous. The rebuild produced
-  only one of three required demonstrations, including the seeded set-2
-  fallback. The 61 main items are an **upper bound**, not a usable cloze set:
-  sample items 15 (`trinh nữ`) and 16 (`phương pháp`) contain citations and
-  English translations in the example text, putting the English target in
-  the prompt and making C7 pass trivially. Items 4 (`chỉ`/point), 19 (`tượng
-  đài`/monument), and 22 (`hội chứng`/syndrome) passed C7 although the reported
-  NLLB strings lack the target; some NLLB strings also end mid-sentence.
-  Item 8 (`hôm qua`) is a multiline verse that passed C2 after line breaks were
-  collapsed to spaces. C6 checks only the blank and immediately adjacent
-  syllable(s), so longer fixed terms pass, including item 12 (`hội đồng`)
-  and item 22 (`hội chứng`).
-- The v1.2 `cloze_*.jsonl` files remain at tag `v1.2` for provenance and are
-  not used by any analysis. No replacement cloze files are emitted. The
-  frozen `cloze_available` column is retained but deprecated and must not be
-  used by any analysis.
-- The audit implementation and local evidence remain available in
-  `data/build/cloze_v13.py`, `docs/data-archive/cloze_v13/cloze_v13_report.json`,
-  `docs/data-archive/cloze_v13/cloze_candidate_failures.jsonl`, and
-  `docs/data-archive/cloze_v13/dropped_cloze.csv`. The candidate report records the full
-  funnel; the rejected issues above are not corrected or re-filtered.
+- **Final concept counts and coverage:** the diac files contain 35 main and
+  seven extension concepts (42 total); the nodiac files contain 30 main and
+  no extension concepts. Main coverage is 35/1,535 (2.28%), with 18/481
+  sino (3.74%) and 10/706 nonsino (1.42%); the remaining seven main concepts
+  are ambiguous. Diac counts by stratum are main: 18 sino, 10 nonsino, 7
+  ambiguous; extension: 2 sino, 3 nonsino, 2 ambiguous. Nodiac counts are
+  main: 16 sino, 8 nonsino, 6 ambiguous; extension: zero in each stratum.
+- **Demonstrations:** `1a9ec27bf14d` from few-shot set 1, query
+  `___ không giải quyết được gì cả.` / answer `bạo lực`; `8fa44725013f` from
+  few-shot set 5, query `Mới mưa xong nền ___, coi chừng té.` / answer `ướt`;
+  and `0a52c03dec8c` from the directions split, query
+  `Làm theo ___, hưởng theo nhu cầu` / answer `năng lực`. All three pass the
+  rules and have `collapsed == false`.
+- Cloze is supplementary and descriptive only. It is excluded from H1/H2/H3
+  decision rules, Holm families, the §7.1 mixed model, and all stratum
+  analyses; it is reported per model with bootstrap confidence intervals.
+  The frozen `cloze_available` column refers to v1.2 and is deprecated. In
+  v1.3, cloze availability means membership in the new prompt files. The
+  v1.3 files are `data/prompts/v1.3/cloze_diac_set1.jsonl` and
+  `data/prompts/v1.3/cloze_nodiac_set1.jsonl`, with the v1.2 schema plus
+  `demo_concept_ids` and `fewshot_set: null`; collapsed items are omitted from
+  nodiac.
+- The builder and historical first-run evidence are in
+  `data/build/cloze_v13.py` and `docs/data-archive/cloze_v13/`. Final-run
+  evidence is archived as `docs/data-archive/cloze_v13/cloze_v13_rebuild_report.json`,
+  `docs/data-archive/cloze_v13/cloze_v13_rebuild_candidate_failures.jsonl`,
+  and `docs/data-archive/cloze_v13/cloze_v13_rebuild_dropped.csv`.

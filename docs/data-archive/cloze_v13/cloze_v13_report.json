@@ -249,8 +249,7 @@
     "extension_nodiac_records": 0,
     "main": 61,
     "main_nodiac_records": 55,
-    "nodiac_records": 55,
-    "nonsino_subset": 22
+    "nodiac_records": 55
   },
   "minimum_main_survivors_met": false,
   "minimum_main_survivors_to_write": 100,
