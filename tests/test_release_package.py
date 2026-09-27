@@ -17,6 +17,7 @@ RELEASE = ROOT / "release"
 RAW = ROOT / "data" / "raw"
 MANIFEST = ROOT / "docs" / "data-archive" / "RELEASE_v1.3.sha256"
 HF_BASE = "f0031da2dd5301738500d2d02963050f4fd355c2"
+HF_V13_1_COMMIT = "8a2d99cadfc898222deed27a1f8f123692072d5c"
 PREPARATION_TAG_URL = (
     "https://github.com/tarudesu/viLens-concepts-preparation/tree/prereg-v1.2"
 )
@@ -126,11 +127,14 @@ def _read_front_matter() -> dict:
 def test_release_manifest_hashes_every_release_file() -> None:
     """The committed manifest records the HF base and every non-README hash."""
     lines = MANIFEST.read_text(encoding="utf-8").splitlines()
-    expected_header = [f"# HF base commit: {HF_BASE}"]
-    if lines[:1] != expected_header:
+    expected_header = [
+        f"# HF base commit: {HF_BASE}",
+        f"# HF v1.3.1 commit: {HF_V13_1_COMMIT}",
+    ]
+    if lines[:2] != expected_header:
         raise AssertionError("Release manifest does not record the expected HF commits")
     entries: dict[str, str] = {}
-    for line in lines[1:]:
+    for line in lines[2:]:
         if not line:
             continue
         digest, path = line.split("  ", 1)
@@ -284,7 +288,8 @@ def test_readme_known_issues_and_changelog_are_present() -> None:
         "922cd1167021",
         "c9584b841817",
         "c505c130104c",
-        "**v1.3:**",
+        "**v1.3 (27 Sep 2026, tag `v1.3`):**",
+        "**v1.3.1:**",
         "C1–C8 plus beam agreement",
         "semantic_min_beam_matches=3",
         "41 diac records (34 main + 7 extension)",
@@ -292,6 +297,9 @@ def test_readme_known_issues_and_changelog_are_present() -> None:
         "few-shot set 1",
         "few-shot set 5",
         "directions split",
+        "f5411853b246",
+        "ne... verb ...pas",
+        "Tokens of the form after a colon, including its leading space",
     )
     missing = [phrase for phrase in required if phrase not in readme]
     if missing:

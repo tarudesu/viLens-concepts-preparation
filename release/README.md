@@ -82,9 +82,9 @@ This release contains **1,837 aligned concepts** with canonical forms in the fiv
 
 ## Construction
 
-The English Wiktionary/Wiktextract translation tables provide the alignment pivot; Vietnamese Wiktextract entries supply etymology and gloss cross-checks. Additional attestation uses MUSE and Wikidata; Mandarin strings are checked against Unihan readings and CC-CEDICT, with WordNet used for single-syllable meaning checks. Frequency comes from wordfreq, while Brysbaert values are withheld in this package. FLORES+ is used for tokenizer fertility and a separate gated direction dataset; its sentence text is not included here.
+The English Wiktionary/Wiktextract translation tables provide the alignment pivot; Vietnamese Wiktextract entries supply etymology and gloss cross-checks. Additional attestation uses MUSE and Wikidata; Signal B verifies the Han spelling recorded in each Vietnamese entry against Unihan Sino-Vietnamese readings and CC-CEDICT headwords, with a WordNet-assisted meaning check for monosyllables. Frequency comes from wordfreq, while Brysbaert values are withheld in this package. FLORES+ is used for tokenizer fertility and a separate gated direction dataset; its sentence text is not included here.
 
-Selection keeps noun/verb/adjective concepts with English lemmas of at most two words and requires two configured attestation sources. The pipeline applies the frozen back-translation, median-polysemy, proper-noun, surface-distance, loanword, and hyphenated-transliteration rules, then assigns the frozen sino/nonsino/ambiguous strata. The v1.2 amendments, analysis plan, provenance notes, and construction materials are maintained in the [preparation repository at the frozen `prereg-v1.2` tag](https://github.com/tarudesu/viLens-concepts-preparation/tree/prereg-v1.2).
+Selection keeps noun/verb/adjective concepts with English lemmas of at most two words and requires two configured attestation sources. The pipeline applies the frozen back-translation, median-polysemy, proper-noun, surface-distance, loanword, and hyphenated-transliteration rules, then assigns the frozen sino/nonsino/ambiguous strata. The v1.2 amendments, analysis plan, provenance notes, and construction materials are maintained in the [preparation repository at the frozen `prereg-v1.2` tag](https://github.com/tarudesu/viLens-concepts-preparation/tree/prereg-v1.2). The v1.3 amendment, the cloze builder and the rebuild evidence will be published in the preparation repository.
 
 ## Fields
 
@@ -103,11 +103,11 @@ The `concepts` configuration is a UTF-8 JSON Lines file: each line is one concep
 | `vi_alts` | Other surviving Vietnamese forms for the concept, stored as a JSON list. |
 | `vi_nodiac` | Vietnamese canonical form with diacritics removed (đ→d). |
 | `collapsed` | Whether the stripped Vietnamese form collides with another real form. |
-| `pos` | Part of speech: noun, verb, or adjective. |
+| `pos` | Part of speech; values are noun, verb or adj. |
 | `en_sense_gloss` | English gloss associated with the aligned sense. |
 | `stratum` | Frozen etymological stratum: sino, nonsino, ambiguous, or other_loan. |
 | `sigA` | Signal A: Wiktionary/Wiktextract etymological classification. |
-| `sigB` | Primary Signal B: external Han-spelling verification classification. |
+| `sigB` | Verification of the Han spelling recorded in the same Wiktionary entry. |
 | `sigB_strict` | Signal B requiring the strict reading, dictionary, and meaning checks. |
 | `sigB_relaxed` | Signal B requiring a verified Vietnamese reading and CEDICT headword. |
 | `sino_via` | Recorded route/type supporting a Sino classification, when available. |
@@ -137,21 +137,21 @@ The `concepts` configuration is a UTF-8 JSON Lines file: each line is one concep
 | `n_chars_fr` | Unicode codepoint count, including spaces, in the canonical fr form. |
 | `n_chars_id` | Unicode codepoint count, including spaces, in the canonical id form. |
 | `concreteness_match` | Brysbaert matching route (exact/head/none); concreteness values are omitted. |
-| `ntok_gemma_vi` | gemma tokenizer count for vi, measured in context as len(tok('x: '+form))−len(tok('x: ')). |
-| `ntok_gemma_en` | gemma tokenizer count for en, measured in context as len(tok('x: '+form))−len(tok('x: ')). |
-| `ntok_gemma_zh` | gemma tokenizer count for zh, measured in context as len(tok('x: '+form))−len(tok('x: ')). |
-| `ntok_gemma_fr` | gemma tokenizer count for fr, measured in context as len(tok('x: '+form))−len(tok('x: ')). |
-| `ntok_gemma_id` | gemma tokenizer count for id, measured in context as len(tok('x: '+form))−len(tok('x: ')). |
-| `ntok_qwen_vi` | qwen tokenizer count for vi, measured in context as len(tok('x: '+form))−len(tok('x: ')). |
-| `ntok_qwen_en` | qwen tokenizer count for en, measured in context as len(tok('x: '+form))−len(tok('x: ')). |
-| `ntok_qwen_zh` | qwen tokenizer count for zh, measured in context as len(tok('x: '+form))−len(tok('x: ')). |
-| `ntok_qwen_fr` | qwen tokenizer count for fr, measured in context as len(tok('x: '+form))−len(tok('x: ')). |
-| `ntok_qwen_id` | qwen tokenizer count for id, measured in context as len(tok('x: '+form))−len(tok('x: ')). |
-| `ntok_llama_vi` | llama tokenizer count for vi, measured in context as len(tok('x: '+form))−len(tok('x: ')). |
-| `ntok_llama_en` | llama tokenizer count for en, measured in context as len(tok('x: '+form))−len(tok('x: ')). |
-| `ntok_llama_zh` | llama tokenizer count for zh, measured in context as len(tok('x: '+form))−len(tok('x: ')). |
-| `ntok_llama_fr` | llama tokenizer count for fr, measured in context as len(tok('x: '+form))−len(tok('x: ')). |
-| `ntok_llama_id` | llama tokenizer count for id, measured in context as len(tok('x: '+form))−len(tok('x: ')). |
+| `ntok_gemma_vi` | Tokens of the form after a colon, including its leading space: `len(tok('x: ' + form)) − len(tok('x:'))`. |
+| `ntok_gemma_en` | Tokens of the form after a colon, including its leading space: `len(tok('x: ' + form)) − len(tok('x:'))`. |
+| `ntok_gemma_zh` | Tokens of the form after a colon, including its leading space: `len(tok('x: ' + form)) − len(tok('x:'))`. |
+| `ntok_gemma_fr` | Tokens of the form after a colon, including its leading space: `len(tok('x: ' + form)) − len(tok('x:'))`. |
+| `ntok_gemma_id` | Tokens of the form after a colon, including its leading space: `len(tok('x: ' + form)) − len(tok('x:'))`. |
+| `ntok_qwen_vi` | Tokens of the form after a colon, including its leading space: `len(tok('x: ' + form)) − len(tok('x:'))`. |
+| `ntok_qwen_en` | Tokens of the form after a colon, including its leading space: `len(tok('x: ' + form)) − len(tok('x:'))`. |
+| `ntok_qwen_zh` | Tokens of the form after a colon, including its leading space: `len(tok('x: ' + form)) − len(tok('x:'))`. |
+| `ntok_qwen_fr` | Tokens of the form after a colon, including its leading space: `len(tok('x: ' + form)) − len(tok('x:'))`. |
+| `ntok_qwen_id` | Tokens of the form after a colon, including its leading space: `len(tok('x: ' + form)) − len(tok('x:'))`. |
+| `ntok_llama_vi` | Tokens of the form after a colon, including its leading space: `len(tok('x: ' + form)) − len(tok('x:'))`. |
+| `ntok_llama_en` | Tokens of the form after a colon, including its leading space: `len(tok('x: ' + form)) − len(tok('x:'))`. |
+| `ntok_llama_zh` | Tokens of the form after a colon, including its leading space: `len(tok('x: ' + form)) − len(tok('x:'))`. |
+| `ntok_llama_fr` | Tokens of the form after a colon, including its leading space: `len(tok('x: ' + form)) − len(tok('x:'))`. |
+| `ntok_llama_id` | Tokens of the form after a colon, including its leading space: `len(tok('x: ' + form)) − len(tok('x:'))`. |
 | `single_token_vi_gemma` | Whether the Vietnamese form is one token under the Gemma tokenizer. |
 | `single_token_vi_qwen` | Whether the Vietnamese form is one token under the Qwen tokenizer. |
 | `single_token_vi_llama` | Whether the Vietnamese form is one token under the Llama tokenizer. |
@@ -188,9 +188,15 @@ and the supplementary v1.3 cloze prompt set.
 | `translation` | `nodiac_set1`–`nodiac_set6` | `prompts/translation_nodiac_set*.jsonl` | 1,226 |
 | `directions` | `matched` | `prompts/directions_matched.jsonl` | 1,320 |
 
+`directions_matched.jsonl` is ordered by format and then language. Its first 132
+rows are Vietnamese repetition prompts and look like the repetition config. The
+file also contains translation prompts and prompts in en, zh, fr and id. It covers
+132 concepts that are disjoint from the test set, and it is used to estimate one
+direction per language, not for lens readout.
+
 The `split` column in each record is the frozen partition, not the Hugging Face
-split name. Prompt records use `test`, `directions`, `fit`, or `validate`; concept
-records also use `fewshot_reservoir`.
+split name. Repetition, translation and cloze records use `test`; direction records
+use `fit` or `validate`. Concept records also use `fewshot_reservoir`.
 
 Every field in `concepts.jsonl` is stored as a string, including values that
 represent booleans, counts, and missing values. Prompt files encode booleans and
@@ -200,7 +206,10 @@ records contain `concept_id`, `split`, `m1_extension`, `format`, `condition`,
 `target_id`; target strings retain their leading space. Cloze records use those
 same fields plus `demo_concept_ids` (an array of concept IDs); `fewshot_set` is
 JSON `null`. Direction records contain `concept_id`, `format`, `lang`, `prompt`,
-`split`, and `target`.
+`split`, and `target`. `target_vi` is the expected answer. `target_en`, `target_zh`,
+`target_fr` and `target_id` are readout targets: the lens scores them at each
+layer to measure which language the model represents internally. They are not
+expected outputs.
 
 ## Files and checksums
 
@@ -269,7 +278,7 @@ Concreteness match-route counts across all package concepts (scores omitted):
 
 ## Limitations
 
-The main test set is 83.4% nouns, and its concepts have one Vietnamese sense each; the separate M1 extension has exactly two senses per concept. Etymology classification is automatic (primary κ = 0.594); Signal B partly reuses Wiktionary character-entry readings. Vietnamese Zipf frequency is not directly comparable with Zipf scores for other languages. The preregistered pre-model imbalance was d = +0.89 (Vietnamese frequency), +0.83 (Chinese frequency), −0.83 (concreteness), −0.62 (Vietnamese tokens).
+The main test set is 83.4% nouns, and its concepts have one Vietnamese sense each; the separate M1 extension has exactly two senses per concept. Etymology classification is automatic (primary κ = 0.594); Signal B partly reuses Wiktionary character-entry readings. Vietnamese Zipf frequency is not directly comparable with Zipf scores for other languages. The preregistered pre-model imbalance was d = +0.89 (Vietnamese frequency), +0.83 (Chinese frequency), −0.83 (concreteness), −0.62 (Vietnamese tokens). For multi-syllable forms, wordfreq estimates Vietnamese frequency from the individual syllables, so it tracks syllable rather than word frequency. Spot checks find occasional imprecise targets (e.g. zh 警官 for sergeant, id 'supernatural'), estimated at a few percent of concepts.
 
 ## Not included, and how to add it
 
@@ -279,21 +288,22 @@ The main test set is 83.4% nouns, and its concepts have one Vietnamese sense eac
 
 ## Licensing and attribution
 
-This package is offered under **CC BY-SA 4.0**. Attribution: Wiktionary/Wiktextract (kaikki.org) and wordfreq; Wikidata structured data is CC0; Unihan is distributed under the Unicode License; CC-CEDICT is CC BY-SA. NLLB-200 was used only for validation flags and model weights are not redistributed. MUSE pairs, Brysbaert values, and FLORES sentence text are not included. See [`LICENSE`](LICENSE) for the legal-code reference; source provenance is documented in the [preparation repository at `prereg-v1.2`](https://github.com/tarudesu/viLens-concepts-preparation/tree/prereg-v1.2).
+This package is offered under **CC BY-SA 4.0**. Attribution: Wiktionary/Wiktextract (kaikki.org) and wordfreq; Wikidata structured data is CC0; Unihan is distributed under the Unicode License; CC-CEDICT is CC BY-SA. NLLB-200 was used for back-translation filtering, for choosing among Wiktionary's candidate translations, and for the cloze sense check; no NLLB output text is included and model weights are not redistributed. MUSE pairs, Brysbaert values, and FLORES sentence text are not included. See [`LICENSE`](LICENSE) for the legal-code reference; source provenance is documented in the [preparation repository at `prereg-v1.2`](https://github.com/tarudesu/viLens-concepts-preparation/tree/prereg-v1.2).
 
 ## Known issues
 
-- The v1.2 cloze set is superseded because its audit found malformed, ambiguous, and trivially passing examples; see the [HF `v1.2` tag](https://huggingface.co/datasets/tarudesu/viLens-concepts/tree/v1.2) for provenance.
+- The v1.2 cloze set is superseded because its audit found fragmentary and ambiguous contexts, sense mismatches and answer leakage; see the [HF `v1.2` tag](https://huggingface.co/datasets/tarudesu/viLens-concepts/tree/v1.2) for provenance.
 - `cloze_available` is a frozen v1.2 column and is deprecated; do not use it in analysis.
 - Some v1.3 cloze contexts admit more than one Vietnamese answer. The target sense is verified; uniqueness is not.
 - The v1.2 `prompts` config cannot be loaded with `load_dataset` because of a schema mismatch; read the prompt files directly at the [HF `v1.2` tag](https://huggingface.co/datasets/tarudesu/viLens-concepts/tree/v1.2).
 - `vi_nodiac` is lowercased for gấu Bắc Cực (`1626f004dcd7`) and đậu Lima (`f918ffa42beb`); prompts preserve case.
 - Repetition and translation nodiac demonstrations include collapsed forms: thứ tư, tiệc, and sắt.
-- Questionable targets are retained as frozen data: chết đuối (`151a3fe224ea`), rưỡi (`17781bd98b3c`), tủy xương (`922cd1167021`), hội nghị thượng đỉnh (`c9584b841817`), and cảnh sát chính tả (`c505c130104c`).
+- Questionable targets are retained as frozen data: chết đuối (`151a3fe224ea`), rưỡi (`17781bd98b3c`), tủy xương (`922cd1167021`), hội nghị thượng đỉnh (`c9584b841817`), cảnh sát chính tả (`c505c130104c`), and đừng (`f5411853b246`; French target is the template “ne... verb ...pas”).
 
 ## Changelog
 
-- **v1.3:** Rebuilt the cloze set before any study-LLM run under C1–C8 plus beam agreement:
+- **v1.3 (27 Sep 2026, tag `v1.3`):** Withdrew the v1.2 cloze set. Superseded by v1.3.1.
+- **v1.3.1:** Restores cloze, rebuilt under C1–C8 plus beam agreement:
   - C1 uses eligible aligned-sense usage examples and excludes references and quotations.
   - C2 requires a non-empty, single-line source example.
   - C3 blanks exactly one canonical Vietnamese form.
@@ -308,13 +318,5 @@ This package is offered under **CC BY-SA 4.0**. Attribution: Wiktionary/Wiktextr
 
 ## Citation
 
-To be updated on publication:
-
-```bibtex
-@article{vilens_concepts_2026,
-  author = {Anonymous},
-  title = {The Latent Language of Vietnamese Prompts: Where and When Do LLMs Translate Back?},
-  year = {2026},
-  note = {To be updated on publication}
-}
+To be updated on publication.
 ```
