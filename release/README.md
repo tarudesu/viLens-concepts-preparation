@@ -10,6 +10,12 @@ configs:
       - split: train
         path: concepts.jsonl
     default: true
+  - config_name: cloze
+    data_files:
+      - split: diac_set1
+        path: prompts/cloze_diac_set1.jsonl
+      - split: nodiac_set1
+        path: prompts/cloze_nodiac_set1.jsonl
   - config_name: repetition
     data_files:
       - split: diac_set1
@@ -168,29 +174,33 @@ Partitions are disjoint by concept ID, English lemma, and Vietnamese spelling-eq
 
 ## Configurations, splits, and prompt records
 
-The two prompt formats are repetition and translation; the package also includes directions data.
-
+The package provides repetition and translation prompt formats, directions data,
+and the supplementary v1.3 cloze prompt set.
 
 | Hugging Face config | Split names | File | Rows per split |
 |---|---|---|---:|
 | `concepts` | `train` | `concepts.jsonl` | 1,837 |
+| `cloze` | `diac_set1` | `prompts/cloze_diac_set1.jsonl` | 41 |
+| `cloze` | `nodiac_set1` | `prompts/cloze_nodiac_set1.jsonl` | 29 |
 | `repetition` | `diac_set1`–`diac_set6` | `prompts/repetition_diac_set*.jsonl` | 1,658 |
 | `repetition` | `nodiac_set1`–`nodiac_set6` | `prompts/repetition_nodiac_set*.jsonl` | 1,236 |
 | `translation` | `diac_set1`–`diac_set6` | `prompts/translation_diac_set*.jsonl` | 1,647 |
 | `translation` | `nodiac_set1`–`nodiac_set6` | `prompts/translation_nodiac_set*.jsonl` | 1,226 |
 | `directions` | `matched` | `prompts/directions_matched.jsonl` | 1,320 |
 
-The JSONL `split` field is the frozen partition carried by each record (`test`,
-`directions`, `fit`, or `validate`); it is distinct from the Hugging Face
-dataset split names in the table. Concept rows also use `fewshot_reservoir` for
-the reservoir partition.
+The `split` column in each record is the frozen partition, not the Hugging Face
+split name. Prompt records use `test`, `directions`, `fit`, or `validate`; concept
+records also use `fewshot_reservoir`.
 
-Every `concepts.jsonl` field is stored as a string. Prompt JSONL records use
-JSON strings, booleans, and integers. Repetition and translation records have
-`concept_id`, `split`, `m1_extension`, `format`, `condition`, `fewshot_set`,
-`prompt`, and `target_vi`, `target_en`, `target_zh`, `target_fr`, `target_id`;
-target strings retain the leading space used by the prompt pipeline. Direction
-records have `concept_id`, `format`, `lang`, `prompt`, `split`, and `target`.
+Every field in `concepts.jsonl` is stored as a string, including values that
+represent booleans, counts, and missing values. Prompt files encode booleans and
+integers as native JSON booleans and integers. Repetition and translation
+records contain `concept_id`, `split`, `m1_extension`, `format`, `condition`,
+`fewshot_set`, `prompt`, and `target_vi`, `target_en`, `target_zh`, `target_fr`,
+`target_id`; target strings retain their leading space. Cloze records use those
+same fields plus `demo_concept_ids` (an array of concept IDs); `fewshot_set` is
+JSON `null`. Direction records contain `concept_id`, `format`, `lang`, `prompt`,
+`split`, and `target`.
 
 ## Files and checksums
 
@@ -199,6 +209,8 @@ SHA-256 checksums for the concept table and all released prompt data files:
 | File | SHA-256 |
 |---|---|
 | `concepts.jsonl` | `f3d009bbec7d7e54738a889a536ba06d6fcbe023f301043f9988e11e97677fc7` |
+| `prompts/cloze_diac_set1.jsonl` | `8da79d5e1b4273b98a7ecd26be152a281dd9c1ffdaf718248f3ab1f69ae0bca1` |
+| `prompts/cloze_nodiac_set1.jsonl` | `322401efc6955aeb7839e9e7e78e2a1a89cf435172758af4d96952c6545fc4a8` |
 | `prompts/directions_matched.jsonl` | `dd0e5fc8ce9366a1df7b38f8555f50e418706045bd4d36fb96acaeec5812dd83` |
 | `prompts/repetition_diac_set1.jsonl` | `e9804c7b44e096a2d410d9551b8fffbeacd92f08c3f0823526d6d59d64810a08` |
 | `prompts/repetition_diac_set2.jsonl` | `2d5eff20242cc5156a3ffee0dde8bf992bb96e51e8678cc1f65c2390c20ba46d` |
@@ -271,16 +283,28 @@ This package is offered under **CC BY-SA 4.0**. Attribution: Wiktionary/Wiktextr
 
 ## Known issues
 
-- Cloze was withdrawn in v1.3 after its audit and rebuild exposed malformed and trivially passing examples; the v1.2 files remain at the [HF `v1.2` tag](https://huggingface.co/datasets/tarudesu/viLens-concepts/tree/v1.2) for provenance only.
-- `cloze_available` is a frozen v1.2 column and is deprecated; do not use it in any analysis.
-- The v1.2 `prompts` config cannot be loaded with `load_dataset`; read its prompt files directly at that tag.
-- `vi_nodiac` is lowercased for gấu Bắc Cực (`1626f004dcd7`) and đậu Lima (`f918ffa42beb`).
-- Nodiac demonstrations include collapsed forms: thứ tư, tiệc, and sắt.
+- The v1.2 cloze set is superseded because its audit found malformed, ambiguous, and trivially passing examples; see the [HF `v1.2` tag](https://huggingface.co/datasets/tarudesu/viLens-concepts/tree/v1.2) for provenance.
+- `cloze_available` is a frozen v1.2 column and is deprecated; do not use it in analysis.
+- Some v1.3 cloze contexts admit more than one Vietnamese answer. The target sense is verified; uniqueness is not.
+- The v1.2 `prompts` config cannot be loaded with `load_dataset` because of a schema mismatch; read the prompt files directly at the [HF `v1.2` tag](https://huggingface.co/datasets/tarudesu/viLens-concepts/tree/v1.2).
+- `vi_nodiac` is lowercased for gấu Bắc Cực (`1626f004dcd7`) and đậu Lima (`f918ffa42beb`); prompts preserve case.
+- Repetition and translation nodiac demonstrations include collapsed forms: thứ tư, tiệc, and sắt.
 - Questionable targets are retained as frozen data: chết đuối (`151a3fe224ea`), rưỡi (`17781bd98b3c`), tủy xương (`922cd1167021`), hội nghị thượng đỉnh (`c9584b841817`), and cảnh sát chính tả (`c505c130104c`).
 
 ## Changelog
 
-- **v1.3:** Withdraws cloze before any study-LLM run; removes the cloze configuration and files from the main release. Repetition, translation, directions, and the frozen concept table are unchanged.
+- **v1.3:** Rebuilt the cloze set before any study-LLM run under C1–C8 plus beam agreement:
+  - C1 uses eligible aligned-sense usage examples and excludes references and quotations.
+  - C2 requires a non-empty, single-line source example.
+  - C3 blanks exactly one canonical Vietnamese form.
+  - C4 requires at least six letter-bearing tokens, including the blank.
+  - C5 rejects forbidden markup and tokens absent from the Vietnamese Wiktextract syllable inventory.
+  - C6 rejects a blank-plus-neighbour window that forms a Wiktionary headword.
+  - C7 requires a matching untruncated top NLLB beam and at least three of five beams to match an allowed English lemma.
+  - C8 rejects the same query paired with a different Vietnamese fill, computed over all candidates with a valid blank.
+  - Beam agreement is configured by `semantic_min_beam_matches=3`; the rules are frozen.
+  - Final files contain 41 diac records (34 main + 7 extension) and 29 nodiac records (29 main + 0 extension).
+  - Demonstrations are `1a9ec27bf14d` (few-shot set 1), `8fa44725013f` (few-shot set 5), and `0a52c03dec8c` (directions split).
 
 ## Citation
 

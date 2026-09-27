@@ -17,7 +17,6 @@ RELEASE = ROOT / "release"
 RAW = ROOT / "data" / "raw"
 MANIFEST = ROOT / "docs" / "data-archive" / "RELEASE_v1.3.sha256"
 HF_BASE = "f0031da2dd5301738500d2d02963050f4fd355c2"
-HF_V13_COMMIT = "ab2e7ffc96bd08053931fafc71a545f23af86568"
 PREPARATION_TAG_URL = (
     "https://github.com/tarudesu/viLens-concepts-preparation/tree/prereg-v1.2"
 )
@@ -105,6 +104,7 @@ def _expected_release_paths() -> set[str]:
     """List the data-only v1.3 release payload paths, excluding its README."""
     paths = {".gitattributes", "LICENSE", "concepts.jsonl"}
     paths.add("prompts/directions_matched.jsonl")
+    paths.update({"prompts/cloze_diac_set1.jsonl", "prompts/cloze_nodiac_set1.jsonl"})
     for prompt_format in ("repetition", "translation"):
         for condition in ("diac", "nodiac"):
             for set_number in range(1, 7):
@@ -124,13 +124,13 @@ def _read_front_matter() -> dict:
 
 
 def test_release_manifest_hashes_every_release_file() -> None:
-    """The committed manifest records both HF commits and every release-file hash."""
+    """The committed manifest records the HF base and every non-README hash."""
     lines = MANIFEST.read_text(encoding="utf-8").splitlines()
-    expected_header = [f"# HF base commit: {HF_BASE}", f"# HF v1.3 commit: {HF_V13_COMMIT}"]
-    if lines[:2] != expected_header:
+    expected_header = [f"# HF base commit: {HF_BASE}"]
+    if lines[:1] != expected_header:
         raise AssertionError("Release manifest does not record the expected HF commits")
     entries: dict[str, str] = {}
-    for line in lines[2:]:
+    for line in lines[1:]:
         if not line:
             continue
         digest, path = line.split("  ", 1)
@@ -143,6 +143,7 @@ def test_release_manifest_hashes_every_release_file() -> None:
     expected = {
         f"release/{path.relative_to(RELEASE).as_posix()}": sha256(path)
         for path in release_files()
+        if path.name != "README.md"
     }
     if entries != expected:
         missing = sorted(set(expected) - set(entries))
@@ -156,7 +157,7 @@ def test_release_manifest_hashes_every_release_file() -> None:
 
 
 def test_release_file_inventory_is_the_data_only_v13_candidate() -> None:
-    """The release tree has exactly the HF-main files except README and cloze prompts."""
+    """The release tree has HF-main data, rebuilt cloze, and README only."""
     actual = {path.relative_to(RELEASE).as_posix() for path in release_files()}
     expected = _expected_release_paths() | {"README.md"}
     if actual != expected:
@@ -167,21 +168,64 @@ def test_release_file_inventory_is_the_data_only_v13_candidate() -> None:
 
 
 def test_readme_front_matter_and_config_splits_match_release_files() -> None:
-    """The card declares required metadata and exactly the four supported configs."""
+    """The card declares required metadata and exactly the five supported configs."""
     front = _read_front_matter()
     required = {"license", "language", "pretty_name", "size_categories", "tags", "configs"}
     if not required.issubset(front):
         raise AssertionError(f"Missing README front-matter keys: {sorted(required - set(front))}")
     configs = front["configs"]
     names = [config["config_name"] for config in configs]
-    if names != ["concepts", "repetition", "translation", "directions"]:
+    if names != ["concepts", "cloze", "repetition", "translation", "directions"]:
         raise AssertionError(f"Unexpected README configs: {names}")
+    split_names = {
+        config["config_name"]: {item["split"] for item in config["data_files"]}
+        for config in configs
+    }
+    expected_splits = {
+        "concepts": {"train"},
+        "cloze": {"diac_set1", "nodiac_set1"},
+        "repetition": {
+            *(f"diac_set{index}" for index in range(1, 7)),
+            *(f"nodiac_set{index}" for index in range(1, 7)),
+        },
+        "translation": {
+            *(f"diac_set{index}" for index in range(1, 7)),
+            *(f"nodiac_set{index}" for index in range(1, 7)),
+        },
+        "directions": {"matched"},
+    }
+    if split_names != expected_splits:
+        raise AssertionError(f"Unexpected README split inventory: {split_names}")
     for config in configs:
         for split in config["data_files"]:
             if not (RELEASE / split["path"]).is_file():
                 raise AssertionError(f"README config points to missing file: {split['path']}")
-    if any("cloze" in split["path"] for config in configs for split in config["data_files"]):
-        raise AssertionError("Withdrawn cloze data remains configured")
+    cloze = next(config for config in configs if config["config_name"] == "cloze")
+    cloze_splits = {item["split"] for item in cloze["data_files"]}
+    if cloze_splits != {"diac_set1", "nodiac_set1"}:
+        raise AssertionError(f"Unexpected cloze split names: {sorted(cloze_splits)}")
+    cloze_paths = {item["path"] for item in cloze["data_files"]}
+    if cloze_paths != {
+        "prompts/cloze_diac_set1.jsonl",
+        "prompts/cloze_nodiac_set1.jsonl",
+    }:
+        raise AssertionError(f"Unexpected cloze file paths: {sorted(cloze_paths)}")
+
+
+def test_cloze_records_include_demo_metadata_and_native_json_types() -> None:
+    """Cloze prompt records carry three demos and a null few-shot-set marker."""
+    for path in sorted((RELEASE / "prompts").glob("cloze_*.jsonl")):
+        with path.open("r", encoding="utf-8") as handle:
+            rows = [json.loads(line) for line in handle]
+        if len(rows) != (41 if path.name == "cloze_diac_set1.jsonl" else 29):
+            raise AssertionError(f"Unexpected cloze row count in {path.name}: {len(rows)}")
+        for row in rows:
+            if row["fewshot_set"] is not None:
+                raise AssertionError(f"Cloze fewshot_set must be JSON null in {path.name}")
+            if not isinstance(row["demo_concept_ids"], list) or len(row["demo_concept_ids"]) != 3:
+                raise AssertionError(f"Invalid cloze demo_concept_ids in {path.name}")
+            if not isinstance(row["m1_extension"], bool):
+                raise AssertionError(f"Cloze m1_extension must be a JSON boolean in {path.name}")
 
 
 def test_readme_checksums_cover_concepts_and_every_prompt_file() -> None:
@@ -223,14 +267,17 @@ def test_readme_links_to_no_absent_local_files() -> None:
 
 
 def test_readme_known_issues_and_changelog_are_present() -> None:
-    """The requested v1.3 withdrawal and frozen-data caveats are documented."""
+    """The v1.3 cloze contract and frozen-data caveats are documented."""
     readme = (RELEASE / "README.md").read_text(encoding="utf-8")
     required = (
-        "Cloze was withdrawn in v1.3",
+        "The v1.2 cloze set is superseded",
         "cloze_available",
         "v1.2 `prompts` config cannot be loaded with `load_dataset`",
+        "schema mismatch",
+        "target sense is verified; uniqueness is not",
         "1626f004dcd7",
         "f918ffa42beb",
+        "prompts preserve case",
         "thứ tư, tiệc, and sắt",
         "151a3fe224ea",
         "17781bd98b3c",
@@ -238,6 +285,13 @@ def test_readme_known_issues_and_changelog_are_present() -> None:
         "c9584b841817",
         "c505c130104c",
         "**v1.3:**",
+        "C1–C8 plus beam agreement",
+        "semantic_min_beam_matches=3",
+        "41 diac records (34 main + 7 extension)",
+        "29 nodiac records (29 main + 0 extension)",
+        "few-shot set 1",
+        "few-shot set 5",
+        "directions split",
     )
     missing = [phrase for phrase in required if phrase not in readme]
     if missing:
