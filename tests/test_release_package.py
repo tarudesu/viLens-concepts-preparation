@@ -17,6 +17,7 @@ RELEASE = ROOT / "release"
 RAW = ROOT / "data" / "raw"
 MANIFEST = ROOT / "docs" / "data-archive" / "RELEASE_v1.3.sha256"
 HF_BASE = "f0031da2dd5301738500d2d02963050f4fd355c2"
+HF_V13_COMMIT = "ab2e7ffc96bd08053931fafc71a545f23af86568"
 PREPARATION_TAG_URL = (
     "https://github.com/tarudesu/viLens-concepts-preparation/tree/prereg-v1.2"
 )
@@ -122,13 +123,14 @@ def _read_front_matter() -> dict:
     return yaml.safe_load(parts[1])
 
 
-def test_release_manifest_hashes_every_non_readme_file() -> None:
-    """The committed manifest records the HF base and every release payload hash."""
+def test_release_manifest_hashes_every_release_file() -> None:
+    """The committed manifest records both HF commits and every release-file hash."""
     lines = MANIFEST.read_text(encoding="utf-8").splitlines()
-    if not lines or lines[0] != f"# HF base commit: {HF_BASE}":
-        raise AssertionError("Release manifest does not record the expected HF base commit")
+    expected_header = [f"# HF base commit: {HF_BASE}", f"# HF v1.3 commit: {HF_V13_COMMIT}"]
+    if lines[:2] != expected_header:
+        raise AssertionError("Release manifest does not record the expected HF commits")
     entries: dict[str, str] = {}
-    for line in lines[1:]:
+    for line in lines[2:]:
         if not line:
             continue
         digest, path = line.split("  ", 1)
@@ -139,8 +141,8 @@ def test_release_manifest_hashes_every_non_readme_file() -> None:
         entries[path] = digest
 
     expected = {
-        f"release/{path}": sha256(RELEASE / path)
-        for path in _expected_release_paths()
+        f"release/{path.relative_to(RELEASE).as_posix()}": sha256(path)
+        for path in release_files()
     }
     if entries != expected:
         missing = sorted(set(expected) - set(entries))
