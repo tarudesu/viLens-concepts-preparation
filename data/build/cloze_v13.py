@@ -340,6 +340,7 @@ def _failure(candidate: dict[str, Any], rule: str, reason: str) -> dict[str, Any
         "nllb_limit_hits": candidate.get("nllb_limit_hits", []),
         "c7_match_type": candidate.get("c7_match_type"),
         "c7_match_word": candidate.get("c7_match_word"),
+        "c8_conflicts": candidate.get("c8_conflicts", []),
     }
 
 
@@ -490,6 +491,7 @@ def filter_cloze_candidates_c1_to_c7(
 ) -> tuple[
     list[dict[str, Any]], dict[str, dict[str, int]], list[dict[str, Any]],
     dict[str, dict[str, int]], dict[str, int], dict[str, dict[str, Counter[str]]],
+    list[dict[str, Any]],
 ]:
     """Apply the ordered content rules C1–C7 and return survivors and audit counts."""
     current = sorted(candidates, key=lambda row: row["candidate_id"])
@@ -545,6 +547,9 @@ def filter_cloze_candidates_c1_to_c7(
         return True, ""
 
     apply_rule("C3", c3)
+    # C8 is displayed last in the ordered funnel, but its query context is fixed
+    # here: every candidate with a valid blank, before C4–C7 can filter it out.
+    c3_context_candidates = [dict(candidate) for candidate in current]
 
     def c4(candidate: dict[str, Any]) -> tuple[bool, str]:
         candidate["token_count"] = count_query_tokens(candidate["query"])
@@ -640,7 +645,7 @@ def filter_cloze_candidates_c1_to_c7(
     }
     return (
         current, counts, failures, {key: dict(value) for key, value in per_concept.items()},
-        nllb_stats, pos_counts,
+        nllb_stats, pos_counts, c3_context_candidates,
     )
 
 
@@ -652,6 +657,29 @@ def query_owner_map(candidates: list[dict[str, Any]]) -> dict[str, set[str]]:
     return dict(owners)
 
 
+def c8_conflicts(
+    candidate: dict[str, Any], context_candidates: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    """Find same-query candidates with a different normalized Vietnamese fill."""
+    query = candidate["query"]
+    fill = normalize_nfc(candidate.get("vi", "")).strip().casefold()
+    conflicts = []
+    for other in context_candidates:
+        if other.get("candidate_id") == candidate.get("candidate_id"):
+            continue
+        if other.get("query") != query:
+            continue
+        other_fill = normalize_nfc(other.get("vi", "")).strip().casefold()
+        if other_fill == fill:
+            continue
+        conflicts.append({
+            "candidate_id": str(other.get("candidate_id", "")),
+            "concept_id": str(other.get("concept_id", "")),
+            "vi": str(other.get("vi", "")),
+        })
+    return sorted(conflicts, key=lambda item: (item["concept_id"], item["candidate_id"], item["vi"]))
+
+
 def select_demo_concept_ids(
     *,
     candidate_rows: list[dict[str, Any]],
@@ -661,11 +689,10 @@ def select_demo_concept_ids(
     demo_count: int,
     preferred_min_tokens: int,
     test_rows: list[dict[str, Any]],
+    context_candidates: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Choose noncollapsed passing demos by set tier, then directions, balancing POS."""
     test_ids = {row["concept_id"] for row in test_rows}
-    target_candidates = [candidate for candidate in candidate_rows if candidate["concept_id"] in test_ids]
-    target_owners = query_owner_map(target_candidates)
     selected: list[str] = []
     selected_candidates: list[dict[str, Any]] = []
     candidates_by_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -675,7 +702,6 @@ def select_demo_concept_ids(
         row["concept_id"]: row
         for row in [*(item for group in fewshot_sets.values() for item in group), *directions_rows, *test_rows]
     }
-    selected_queries: dict[str, set[str]] = defaultdict(set)
     selected_pos: set[str] = set()
 
     def candidate_for(concept_id: str) -> dict[str, Any] | None:
@@ -684,8 +710,7 @@ def select_demo_concept_ids(
             return None
         options = [
             candidate for candidate in candidates_by_id.get(concept_id, [])
-            if not (target_owners.get(candidate["query"], set()) - {concept_id})
-            and not (selected_queries.get(candidate["query"], set()) - {concept_id})
+            if not c8_conflicts(candidate, context_candidates)
         ]
         if not options:
             return None
@@ -735,7 +760,6 @@ def select_demo_concept_ids(
             selected.append(concept_id)
             selected_candidates.append(candidate)
             selected_pos.add(candidate["pos"])
-            selected_queries[candidate["query"]].add(concept_id)
             if len(selected) == demo_count:
                 return selected_candidates
     return selected_candidates
@@ -744,19 +768,24 @@ def select_demo_concept_ids(
 def apply_c8(
     candidates: list[dict[str, Any]],
     *,
+    context_candidates: list[dict[str, Any]],
     per_concept_counts: dict[str, dict[str, int]],
     prior_failures: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, dict[str, int]]]:
-    """Drop every surviving candidate query shared by a different concept."""
-    owners = query_owner_map(candidates)
+    """Drop candidates colliding with a different fill anywhere in the C3 pool."""
     kept: list[dict[str, Any]] = []
     failures = list(prior_failures)
     for candidate in candidates:
-        other_owners = owners[candidate["query"]] - {candidate["concept_id"]}
-        if other_owners:
+        conflicts = c8_conflicts(candidate, context_candidates)
+        if conflicts:
+            candidate["c8_conflicts"] = conflicts
+            colliders = ", ".join(
+                f"{item['concept_id']} ({item['candidate_id']}; vi={item['vi']!r})"
+                for item in conflicts
+            )
             failures.append(_failure(
                 candidate, "C8",
-                f"masked query is also used by concept(s): {', '.join(sorted(other_owners))}",
+                f"masked query collides with different Vietnamese fill(s): {colliders}",
             ))
         else:
             kept.append(candidate)
@@ -1025,7 +1054,7 @@ def build_cloze_v13(
     )
     before_calls = int(getattr(translator, "translation_calls", 0))
     before_hits = int(getattr(translator, "cache_hits", 0))
-    c1_c7, funnel_counts, failures, per_concept_counts, nllb_stats, stage_pos = filter_cloze_candidates_c1_to_c7(
+    c1_c7, funnel_counts, failures, per_concept_counts, nllb_stats, stage_pos, c3_context_candidates = filter_cloze_candidates_c1_to_c7(
         example_candidates,
         headwords=headwords,
         forbidden_characters=settings["forbidden_characters"],
@@ -1049,6 +1078,7 @@ def build_cloze_v13(
         demo_count=int(settings["demo_count"]),
         preferred_min_tokens=int(settings["preferred_example_min_tokens"]),
         test_rows=test_rows,
+        context_candidates=c3_context_candidates,
     )
     demo_ids = [candidate["concept_id"] for candidate in demo_candidates]
     final_concept_ids = test_ids | set(demo_ids)
@@ -1059,6 +1089,7 @@ def build_cloze_v13(
     }
     c8_kept, failures, per_concept_counts = apply_c8(
         c8_input,
+        context_candidates=c3_context_candidates,
         per_concept_counts=per_concept_counts,
         prior_failures=failures,
     )
@@ -1283,7 +1314,7 @@ def build_cloze_v13(
             "num_return": step07_config["num_return"],
             "max_new_tokens": int(getattr(translator, "max_new_tokens", step07_config["max_new_tokens"])),
         },
-        "semantic_rule": "any untruncated configured return beam contains a lemmatized target lemma, two-word head lemma, or same-POS WordNet synset lemma",
+        "semantic_rule": "top beam only: the untruncated top NLLB beam contains a lemmatized target lemma, two-word head lemma, or same-POS WordNet synset lemma",
         "survivor_sample_seed": int(config["seed"]),
         "survivor_sample": sample_rows,
         "surviving_test_items": surviving_test_items,

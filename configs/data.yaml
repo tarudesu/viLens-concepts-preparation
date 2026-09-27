@@ -355,7 +355,7 @@ prompts:
     demo_count: 3
     preferred_demo_vi: ["nghiên cứu", "bạo lực"]
     maximum_main_survivors: 61 # Stop if the stricter rebuild exceeds the prior audit upper bound.
-    maximum_extension_survivors: 5 # Stop if the stricter rebuild exceeds the prior audit upper bound.
+    maximum_extension_survivors: 7 # Accepted bound after the untruncated top-beam rerun admitted three concepts.
     nllb_max_new_tokens: 256 # C7 flags and excludes every beam that consumes this full budget.
     forbidden_characters: ["(", ")", "[", "]", "/", "|", "~"]
     semantic_use_all_returned_beams: false # C7 uses the top beam only; outputs that hit the token limit never count.

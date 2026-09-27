@@ -182,17 +182,61 @@ def test_named_rebuild_sample_defects_have_strict_rule_guards() -> None:
 
 def test_c8_removes_shared_queries_and_old_query_extraction_handles_multiline() -> None:
     candidates = [
-        {"candidate_id": "a", "concept_id": "a", "query": "___ here", "pos": "noun", "split": "test", "m1_extension": False},
-        {"candidate_id": "b", "concept_id": "b", "query": "___ here", "pos": "verb", "split": "test", "m1_extension": False},
-        {"candidate_id": "c", "concept_id": "c", "query": "unique ___", "pos": "noun", "split": "test", "m1_extension": False},
+        {"candidate_id": "a", "concept_id": "a", "vi": "một", "query": "___ here", "pos": "noun", "split": "test", "m1_extension": False},
+        {"candidate_id": "b", "concept_id": "b", "vi": "hai", "query": "___ here", "pos": "verb", "split": "test", "m1_extension": False},
+        {"candidate_id": "c", "concept_id": "c", "vi": "ba", "query": "unique ___", "pos": "noun", "split": "test", "m1_extension": False},
     ]
     counts = {item["concept_id"]: {"candidates": 1, "after_C7": 1} for item in candidates}
-    kept, failures, counts = cloze_v13.apply_c8(candidates, per_concept_counts=counts, prior_failures=[])
+    kept, failures, counts = cloze_v13.apply_c8(
+        candidates, context_candidates=candidates,
+        per_concept_counts=counts, prior_failures=[],
+    )
     assert [item["concept_id"] for item in kept] == ["c"]
     assert [item["failed_rule"] for item in failures] == ["C8", "C8"]
     assert counts["a"]["after_C8"] == 0
     prompt = "Demo ___\nĐáp án: A\nDemo ___\nĐáp án: B\nDemo ___\nĐáp án: C\nA poem\nline two\nĐáp án:"
     assert cloze_v13.old_query_from_prompt(prompt, "Đáp án:") == "A poem\nline two"
+
+
+def test_c8_uses_c3_pool_for_xa_hoi_chu_nghia_f22472e471f9_collision() -> None:
+    xa_hoi_chu_nghia = {
+        "candidate_id": "a5fcf428ddad:0:0:0",
+        "concept_id": "a5fcf428ddad",
+        "vi": "xã hội chủ nghĩa",
+        "query": "Kinh tế thị trường định hướng ___",
+        "pos": "noun", "split": "test", "m1_extension": False,
+    }
+    f22472e471f9 = {
+        "candidate_id": "f22472e471f9:0:0:0",
+        "concept_id": "f22472e471f9",
+        "vi": "chủ nghĩa xã hội",
+        "query": "Kinh tế thị trường định hướng ___",
+        "pos": "noun", "split": "test", "m1_extension": False,
+    }
+    counts = {xa_hoi_chu_nghia["concept_id"]: {"candidates": 1, "after_C7": 1}}
+    kept, failures, _ = cloze_v13.apply_c8(
+        [xa_hoi_chu_nghia],
+        context_candidates=[xa_hoi_chu_nghia, f22472e471f9],
+        per_concept_counts=counts,
+        prior_failures=[],
+    )
+    assert kept == []
+    assert failures[0]["failed_rule"] == "C8"
+    assert failures[0]["c8_conflicts"] == [{
+        "candidate_id": "f22472e471f9:0:0:0",
+        "concept_id": "f22472e471f9",
+        "vi": "chủ nghĩa xã hội",
+    }]
+
+    same_fill = {**f22472e471f9, "vi": "xã hội chủ nghĩa"}
+    kept, failures, _ = cloze_v13.apply_c8(
+        [xa_hoi_chu_nghia],
+        context_candidates=[xa_hoi_chu_nghia, same_fill],
+        per_concept_counts={"a5fcf428ddad": {"candidates": 1, "after_C7": 1}},
+        prior_failures=[],
+    )
+    assert kept == [xa_hoi_chu_nghia]
+    assert failures == []
 
 
 def test_nllb_limit_guard_flags_only_sequences_that_reach_budget() -> None:
