@@ -1,14 +1,12 @@
-"""Release-package privacy, provenance, documentation, and restoration checks."""
+"""Integrity and documentation checks for the HF-main release candidate."""
 
 from __future__ import annotations
 
 from collections import deque
-import csv
 import hashlib
+import json
 from pathlib import Path
 import re
-import subprocess
-import sys
 
 import pyarrow.parquet as pq
 import yaml
@@ -17,19 +15,26 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE = ROOT / "release"
 RAW = ROOT / "data" / "raw"
-
-
-def read_tsv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
-    """Read a pipeline TSV after its commit-comment line."""
-    with path.open("r", encoding="utf-8", newline="") as handle:
-        handle.readline()
-        reader = csv.DictReader(handle, delimiter="\t")
-        return list(reader.fieldnames or []), list(reader)
+MANIFEST = ROOT / "docs" / "data-archive" / "RELEASE_v1.3.sha256"
+HF_BASE = "f0031da2dd5301738500d2d02963050f4fd355c2"
+PREPARATION_TAG_URL = (
+    "https://github.com/tarudesu/viLens-concepts-preparation/tree/prereg-v1.2"
+)
+HF_V12_TAG_URL = "https://huggingface.co/datasets/tarudesu/viLens-concepts/tree/v1.2"
 
 
 def release_files() -> list[Path]:
-    """Return all regular files in the built release tree."""
+    """Return all regular files in the candidate release tree."""
     return sorted(path for path in RELEASE.rglob("*") if path.is_file())
+
+
+def sha256(path: Path) -> str:
+    """Hash a file in chunks without reading it all into memory."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 class _TrieNode:
@@ -84,7 +89,7 @@ def contains_any(text: str, patterns: set[str]) -> bool:
 
 
 def _flores_sentences() -> set[str]:
-    """Read all local FLORES dev/devtest sentences for leak checks."""
+    """Read the ten registered local FLORES dev/devtest files for leak checks."""
     result: set[str] = set()
     paths = sorted((RAW / "flores").glob("*.parquet"))
     if len(paths) != 10:
@@ -95,54 +100,158 @@ def _flores_sentences() -> set[str]:
     return result
 
 
-def _sha256(path: Path) -> str:
-    """Hash a file without retaining its full contents in memory."""
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _expected_release_paths() -> set[str]:
+    """List the data-only v1.3 release payload paths, excluding its README."""
+    paths = {".gitattributes", "LICENSE", "concepts.jsonl"}
+    paths.add("prompts/directions_matched.jsonl")
+    for prompt_format in ("repetition", "translation"):
+        for condition in ("diac", "nodiac"):
+            for set_number in range(1, 7):
+                paths.add(
+                    f"prompts/{prompt_format}_{condition}_set{set_number}.jsonl"
+                )
+    return paths
 
 
-def _run_restore(script: str, args: list[str]) -> None:
-    """Run a bundled restoration script in the current uv Python environment."""
-    result = subprocess.run(
-        [sys.executable, str(RELEASE / "scripts" / script), *args],
-        cwd=ROOT, capture_output=True, text=True, check=False,
+def _read_front_matter() -> dict:
+    """Parse the README YAML front matter."""
+    readme = (RELEASE / "README.md").read_text(encoding="utf-8")
+    parts = readme.split("---", 2)
+    if len(parts) != 3 or parts[0].strip():
+        raise AssertionError("README must start with YAML front matter")
+    return yaml.safe_load(parts[1])
+
+
+def test_release_manifest_hashes_every_non_readme_file() -> None:
+    """The committed manifest records the HF base and every release payload hash."""
+    lines = MANIFEST.read_text(encoding="utf-8").splitlines()
+    if not lines or lines[0] != f"# HF base commit: {HF_BASE}":
+        raise AssertionError("Release manifest does not record the expected HF base commit")
+    entries: dict[str, str] = {}
+    for line in lines[1:]:
+        if not line:
+            continue
+        digest, path = line.split("  ", 1)
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise AssertionError(f"Invalid SHA-256 digest in manifest: {path}")
+        if path in entries:
+            raise AssertionError(f"Duplicate release manifest entry: {path}")
+        entries[path] = digest
+
+    expected = {
+        f"release/{path}": sha256(RELEASE / path)
+        for path in _expected_release_paths()
+    }
+    if entries != expected:
+        missing = sorted(set(expected) - set(entries))
+        extra = sorted(set(entries) - set(expected))
+        changed = sorted(
+            path for path in set(entries) & set(expected) if entries[path] != expected[path]
+        )
+        raise AssertionError(
+            f"Release manifest mismatch: missing={missing}, extra={extra}, changed={changed}"
+        )
+
+
+def test_release_file_inventory_is_the_data_only_v13_candidate() -> None:
+    """The release tree has exactly the HF-main files except README and cloze prompts."""
+    actual = {path.relative_to(RELEASE).as_posix() for path in release_files()}
+    expected = _expected_release_paths() | {"README.md"}
+    if actual != expected:
+        raise AssertionError(
+            f"Release file inventory mismatch: missing={sorted(expected - actual)}, "
+            f"extra={sorted(actual - expected)}"
+        )
+
+
+def test_readme_front_matter_and_config_splits_match_release_files() -> None:
+    """The card declares required metadata and exactly the four supported configs."""
+    front = _read_front_matter()
+    required = {"license", "language", "pretty_name", "size_categories", "tags", "configs"}
+    if not required.issubset(front):
+        raise AssertionError(f"Missing README front-matter keys: {sorted(required - set(front))}")
+    configs = front["configs"]
+    names = [config["config_name"] for config in configs]
+    if names != ["concepts", "repetition", "translation", "directions"]:
+        raise AssertionError(f"Unexpected README configs: {names}")
+    for config in configs:
+        for split in config["data_files"]:
+            if not (RELEASE / split["path"]).is_file():
+                raise AssertionError(f"README config points to missing file: {split['path']}")
+    if any("cloze" in split["path"] for config in configs for split in config["data_files"]):
+        raise AssertionError("Withdrawn cloze data remains configured")
+
+
+def test_readme_checksums_cover_concepts_and_every_prompt_file() -> None:
+    """The Files and checksums table is complete and matches the released data."""
+    readme = (RELEASE / "README.md").read_text(encoding="utf-8")
+    if "## Files and checksums" not in readme:
+        raise AssertionError("README is missing the Files and checksums section")
+    section = readme.split("## Files and checksums", 1)[1].split("\n## ", 1)[0]
+    tick = chr(96)
+    found = {
+        match.group(1): match.group(2)
+        for match in re.finditer(
+            rf"\| {tick}([^`]+){tick} \| {tick}([0-9a-f]{{64}}){tick} \|", section
+        )
+    }
+    expected_paths = {
+        path.relative_to(RELEASE).as_posix()
+        for path in [RELEASE / "concepts.jsonl", *sorted((RELEASE / "prompts").glob("*.jsonl"))]
+    }
+    if set(found) != expected_paths:
+        raise AssertionError(
+            f"README checksum coverage mismatch: missing={sorted(expected_paths - set(found))}, "
+            f"extra={sorted(set(found) - expected_paths)}"
+        )
+    for relative, digest in found.items():
+        if sha256(RELEASE / relative) != digest:
+            raise AssertionError(f"README checksum mismatch for {relative}")
+
+
+def test_readme_links_to_no_absent_local_files() -> None:
+    """All relative README links resolve inside the data-only release tree."""
+    readme = (RELEASE / "README.md").read_text(encoding="utf-8")
+    for target in re.findall(r"\[[^\]]+\]\(([^)]+)\)", readme):
+        if "://" in target or target.startswith("#"):
+            continue
+        local_path = target.split("#", 1)[0]
+        if local_path and not (RELEASE / local_path).exists():
+            raise AssertionError(f"README links to an absent release file: {target}")
+
+
+def test_readme_known_issues_and_changelog_are_present() -> None:
+    """The requested v1.3 withdrawal and frozen-data caveats are documented."""
+    readme = (RELEASE / "README.md").read_text(encoding="utf-8")
+    required = (
+        "Cloze was withdrawn in v1.3",
+        "cloze_available",
+        "v1.2 `prompts` config cannot be loaded with `load_dataset`",
+        "1626f004dcd7",
+        "f918ffa42beb",
+        "thứ tư, tiệc, and sắt",
+        "151a3fe224ea",
+        "17781bd98b3c",
+        "922cd1167021",
+        "c9584b841817",
+        "c505c130104c",
+        "**v1.3:**",
     )
-    if result.returncode != 0:
-        raise AssertionError(f"Bundled {script} failed with exit code {result.returncode}")
-
-
-def test_released_concepts_preserve_rows_and_drop_configured_columns() -> None:
-    """The release table has the same concept IDs and omits restricted values."""
-    config = yaml.safe_load((ROOT / "configs" / "data.yaml").read_text(encoding="utf-8"))
-    release_config = config["release"]
-    released_columns, released_rows = read_tsv(RELEASE / "concepts.tsv")
-    source_columns, source_rows = read_tsv(ROOT / "data" / "concepts.tsv")
-    dropped = set(release_config["drop_columns"])
-    if release_config["include_concreteness_values"] is not True:
-        dropped.add("concreteness")
-    if dropped.intersection(released_columns):
-        raise AssertionError("A configured restricted column remains in the release table")
-    if set(released_columns) != set(source_columns) - dropped:
-        raise AssertionError("Released columns differ from the configured source-column projection")
-    if len(released_rows) != len(source_rows):
-        raise AssertionError("Release row count differs from data/concepts.tsv")
-    if {row["concept_id"] for row in released_rows} != {row["concept_id"] for row in source_rows}:
-        raise AssertionError("Release concept_id set differs from data/concepts.tsv")
+    missing = [phrase for phrase in required if phrase not in readme]
+    if missing:
+        raise AssertionError(f"README is missing required v1.3 documentation: {missing}")
 
 
 def test_no_flores_sentence_occurs_in_any_release_file() -> None:
     """No complete FLORES dev/devtest sentence is present in released files."""
     sentences = _flores_sentences()
-    combined_release_text = "\0".join(path.read_text(encoding="utf-8") for path in release_files())
-    if contains_any(combined_release_text, sentences):
+    combined = "\0".join(path.read_text(encoding="utf-8") for path in release_files())
+    if contains_any(combined, sentences):
         raise AssertionError("FLORES sentence text found in a release file")
 
 
 def test_no_token_or_huggingface_credential_pattern_occurs_in_release() -> None:
-    """The upload token and token-shaped strings are absent without exposing them."""
+    """The configured upload token and token-shaped strings are absent."""
     token_path = ROOT / "keys" / "hf-w.txt"
     token = token_path.read_bytes().strip()
     if not token:
@@ -154,91 +263,33 @@ def test_no_token_or_huggingface_credential_pattern_occurs_in_release() -> None:
             raise AssertionError(f"Credential-like content found in release file {path.relative_to(RELEASE)}")
 
 
-def test_no_user_identity_is_included_in_release() -> None:
-    """Keep the anonymous-review package free of the repository author's identity."""
+def test_no_user_identity_except_requested_preparation_link() -> None:
+    """Only the required explicit repository and HF tag links may contain the owner name."""
+    allowed = (PREPARATION_TAG_URL.encode("utf-8").lower(), HF_V12_TAG_URL.encode("utf-8").lower())
     forbidden = (b"tarudesu", b"luannt@uit.edu.vn")
     for path in release_files():
         content = path.read_bytes().lower()
+        for url in allowed:
+            content = content.replace(url, b"")
         if any(value in content for value in forbidden):
             raise AssertionError(f"User identity found in release file {path.relative_to(RELEASE)}")
 
 
-def test_muse_dictionary_files_are_not_in_release() -> None:
-    """The raw MUSE pair dictionaries and the MUSE flag are not redistributed."""
-    columns, _ = read_tsv(RELEASE / "concepts.tsv")
-    if "in_muse" in columns:
-        raise AssertionError("The MUSE attestation flag must not be released")
-    released = release_files()
-    for source in (RAW / "muse" / "vi-en.txt", RAW / "muse" / "en-vi.txt"):
-        source_hash = _sha256(source)
-        if any(path.name == source.name or _sha256(path) == source_hash for path in released):
-            raise AssertionError("A raw MUSE dictionary file is present in the release")
-
-
-def test_every_released_column_is_documented_in_dataset_card() -> None:
-    """The card field table documents every released concepts.tsv column."""
-    columns, _ = read_tsv(RELEASE / "concepts.tsv")
-    card = (RELEASE / "README.md").read_text(encoding="utf-8")
-    field_table = card.split("## Fields", 1)[1].split("## Splits", 1)[0]
-    tick = chr(96)
-    documented = {
-        line.split(tick, 2)[1]
-        for line in field_table.splitlines()
-        if line.startswith("| " + tick) and tick in line[3:]
-    }
-    if set(columns) != documented:
-        raise AssertionError(
-            f"Dataset-card field documentation mismatch: missing={sorted(set(columns) - documented)}, "
-            f"extra={sorted(documented - set(columns))}"
-        )
-
-
-def test_restoration_scripts_reproduce_omitted_data_byte_for_byte(tmp_path: Path) -> None:
-    """The bundled scripts reconstruct the frozen source columns/output exactly."""
-    _, source_rows = read_tsv(ROOT / "data" / "concepts.tsv")
-    muse_output = tmp_path / "with_muse.tsv"
-    _run_restore("add_muse_flag.py", [
-        "--concepts", str(RELEASE / "concepts.tsv"),
-        "--vi-en", str(RAW / "muse" / "vi-en.txt"),
-        "--en-vi", str(RAW / "muse" / "en-vi.txt"),
-        "--sources", str(ROOT / "data" / "build" / "SOURCES.md"),
-        "--output", str(muse_output),
-    ])
-    muse_columns, muse_rows = read_tsv(muse_output)
-    if "in_muse" not in muse_columns:
-        raise AssertionError("MUSE restoration did not produce the omitted column")
-    expected_muse = [(row["concept_id"], row["in_muse"]) for row in source_rows]
-    actual_muse = [(row["concept_id"], row["in_muse"]) for row in muse_rows]
-    if expected_muse != actual_muse:
-        raise AssertionError("Restored in_muse values differ from the frozen concepts.tsv column")
-
-    concreteness_output = tmp_path / "with_concreteness.tsv"
-    _run_restore("add_concreteness.py", [
-        "--concepts", str(RELEASE / "concepts.tsv"),
-        "--xlsx", str(RAW / "brysbaert" / "13428_2013_403_MOESM1_ESM.xlsx"),
-        "--sources", str(ROOT / "data" / "build" / "SOURCES.md"),
-        "--output", str(concreteness_output),
-    ])
-    concreteness_columns, concreteness_rows = read_tsv(concreteness_output)
-    if "concreteness" not in concreteness_columns:
-        raise AssertionError("Concreteness restoration did not produce the omitted column")
-    expected_by_id = [
-        (row["concept_id"], row["concreteness"], row["concreteness_match"])
-        for row in source_rows
-    ]
-    actual_by_id = [
-        (row["concept_id"], row["concreteness"], row["concreteness_match"])
-        for row in concreteness_rows
-    ]
-    if expected_by_id != actual_by_id:
-        raise AssertionError("Restored concreteness fields differ from the frozen concepts.tsv values")
-
-    flores_output = tmp_path / "directions_flores.jsonl"
-    _run_restore("build_flores_directions.py", [
-        "--flores-dir", str(RAW / "flores"),
-        "--sources", str(ROOT / "data" / "build" / "SOURCES.md"),
-        "--output", str(flores_output),
-    ])
-    original_flores = ROOT / "data" / "prompts" / "directions_flores.jsonl"
-    if flores_output.read_bytes() != original_flores.read_bytes():
-        raise AssertionError("FLORES restoration output differs byte-for-byte from the frozen JSONL")
+def test_concepts_are_jsonl_and_omit_the_muse_flag() -> None:
+    """Concept objects are valid JSON Lines and do not distribute the MUSE flag."""
+    path = RELEASE / "concepts.jsonl"
+    count = 0
+    expected_fields: set[str] | None = None
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            row = json.loads(line)
+            count += 1
+            fields = set(row)
+            if expected_fields is None:
+                expected_fields = fields
+            elif fields != expected_fields:
+                raise AssertionError("Concept JSONL rows have inconsistent fields")
+            if "in_muse" in fields:
+                raise AssertionError("The MUSE attestation flag must not be released")
+    if count != 1837:
+        raise AssertionError(f"Expected 1,837 concept records, found {count}")

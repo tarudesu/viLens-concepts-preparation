@@ -146,7 +146,7 @@ v1.2 (2026-09-26; pre-data; no model outputs exist at the time of this amendment
   frozen `cloze_available` column is retained but deprecated and must not be
   used by any analysis.
 - The audit implementation and local evidence remain available in
-  `data/build/cloze_v13.py`, `data/interim/cloze_v13_report.json`,
-  `data/interim/cloze_candidate_failures.jsonl`, and
-  `data/interim/dropped_cloze.csv`. The candidate report records the full
+  `data/build/cloze_v13.py`, `docs/data-archive/cloze_v13/cloze_v13_report.json`,
+  `docs/data-archive/cloze_v13/cloze_candidate_failures.jsonl`, and
+  `docs/data-archive/cloze_v13/dropped_cloze.csv`. The candidate report records the full
   funnel; the rejected issues above are not corrected or re-filtered.

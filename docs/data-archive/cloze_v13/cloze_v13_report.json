@@ -1,0 +1,508 @@
+{
+  "candidate_failure_records": 591,
+  "candidate_funnel": {
+    "extension": [
+      {
+        "n": 199,
+        "n_by_pos": {
+          "adj": 26,
+          "noun": 106,
+          "verb": 67
+        },
+        "stage": "candidates"
+      },
+      {
+        "n": 100,
+        "n_by_pos": {
+          "adj": 14,
+          "noun": 48,
+          "verb": 38
+        },
+        "stage": "after_C1"
+      },
+      {
+        "n": 100,
+        "n_by_pos": {
+          "adj": 14,
+          "noun": 48,
+          "verb": 38
+        },
+        "stage": "after_C2"
+      },
+      {
+        "n": 95,
+        "n_by_pos": {
+          "adj": 14,
+          "noun": 45,
+          "verb": 36
+        },
+        "stage": "after_C3"
+      },
+      {
+        "n": 12,
+        "n_by_pos": {
+          "adj": 1,
+          "noun": 5,
+          "verb": 6
+        },
+        "stage": "after_C4"
+      },
+      {
+        "n": 10,
+        "n_by_pos": {
+          "adj": 1,
+          "noun": 4,
+          "verb": 5
+        },
+        "stage": "after_C5"
+      },
+      {
+        "n": 10,
+        "n_by_pos": {
+          "adj": 1,
+          "noun": 4,
+          "verb": 5
+        },
+        "stage": "after_C6"
+      },
+      {
+        "n": 5,
+        "n_by_pos": {
+          "adj": 1,
+          "noun": 1,
+          "verb": 3
+        },
+        "stage": "after_C7"
+      },
+      {
+        "n": 5,
+        "n_by_pos": {
+          "adj": 1,
+          "noun": 1,
+          "verb": 3
+        },
+        "stage": "after_C8"
+      }
+    ],
+    "main": [
+      {
+        "n": 462,
+        "n_by_pos": {
+          "adj": 53,
+          "noun": 361,
+          "verb": 48
+        },
+        "stage": "candidates"
+      },
+      {
+        "n": 456,
+        "n_by_pos": {
+          "adj": 53,
+          "noun": 355,
+          "verb": 48
+        },
+        "stage": "after_C1"
+      },
+      {
+        "n": 456,
+        "n_by_pos": {
+          "adj": 53,
+          "noun": 355,
+          "verb": 48
+        },
+        "stage": "after_C2"
+      },
+      {
+        "n": 396,
+        "n_by_pos": {
+          "adj": 49,
+          "noun": 304,
+          "verb": 43
+        },
+        "stage": "after_C3"
+      },
+      {
+        "n": 130,
+        "n_by_pos": {
+          "adj": 12,
+          "noun": 105,
+          "verb": 13
+        },
+        "stage": "after_C4"
+      },
+      {
+        "n": 107,
+        "n_by_pos": {
+          "adj": 11,
+          "noun": 83,
+          "verb": 13
+        },
+        "stage": "after_C5"
+      },
+      {
+        "n": 107,
+        "n_by_pos": {
+          "adj": 11,
+          "noun": 83,
+          "verb": 13
+        },
+        "stage": "after_C6"
+      },
+      {
+        "n": 68,
+        "n_by_pos": {
+          "adj": 5,
+          "noun": 53,
+          "verb": 10
+        },
+        "stage": "after_C7"
+      },
+      {
+        "n": 66,
+        "n_by_pos": {
+          "adj": 4,
+          "noun": 52,
+          "verb": 10
+        },
+        "stage": "after_C8"
+      }
+    ]
+  },
+  "coverage": {
+    "extension": {
+      "by_stratum": {
+        "ambiguous": {
+          "n_survived": 2,
+          "n_test": 27,
+          "percent": 7.407407407407407
+        },
+        "nonsino": {
+          "n_survived": 2,
+          "n_test": 68,
+          "percent": 2.9411764705882355
+        },
+        "other_loan": {
+          "n_survived": 0,
+          "n_test": 2,
+          "percent": 0.0
+        },
+        "sino": {
+          "n_survived": 1,
+          "n_test": 26,
+          "percent": 3.8461538461538463
+        }
+      },
+      "n_survived": 5,
+      "n_test": 123
+    },
+    "main": {
+      "by_stratum": {
+        "ambiguous": {
+          "n_survived": 12,
+          "n_test": 347,
+          "percent": 3.4582132564841497
+        },
+        "nonsino": {
+          "n_survived": 20,
+          "n_test": 706,
+          "percent": 2.8328611898016995
+        },
+        "other_loan": {
+          "n_survived": 0,
+          "n_test": 1,
+          "percent": 0.0
+        },
+        "sino": {
+          "n_survived": 29,
+          "n_test": 481,
+          "percent": 6.029106029106029
+        }
+      },
+      "n_survived": 61,
+      "n_test": 1535
+    },
+    "main_nonsino_percent": 2.8328611898016995,
+    "main_sino_percent": 6.029106029106029
+  },
+  "demo_concept_ids": [
+    "1a9ec27bf14d"
+  ],
+  "demo_count_available": 1,
+  "demo_count_required": 3,
+  "demo_fallback_ids_from_set_2": [],
+  "dropped_old_concepts": 279,
+  "final_counts": {
+    "by_stratum": {
+      "extension": {
+        "ambiguous": 2,
+        "nonsino": 2,
+        "sino": 1
+      },
+      "main": {
+        "ambiguous": 12,
+        "nonsino": 20,
+        "sino": 29
+      }
+    },
+    "diac_records": 66,
+    "extension": 5,
+    "extension_nodiac_records": 0,
+    "main": 61,
+    "main_nodiac_records": 55,
+    "nodiac_records": 55,
+    "nonsino_subset": 22
+  },
+  "minimum_main_survivors_met": false,
+  "minimum_main_survivors_to_write": 100,
+  "nllb": {
+    "cache_hits_delta": 118,
+    "calls_delta": 0,
+    "model": "facebook/nllb-200-distilled-600M",
+    "num_beams": 5,
+    "num_return": 5,
+    "outputs": 589,
+    "requests": 119,
+    "revision": "f8d333a098d19b4fd9a8b18f94170487ad3f821d",
+    "unique_requests": 118
+  },
+  "rules": [
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "C5",
+    "C6",
+    "C7",
+    "C8"
+  ],
+  "schema_version": 1,
+  "semantic_rule": "any configured return beam contains a lemmatized exact lemma/head lemma or WordNet synonym",
+  "survivor_sample": [
+    {
+      "NLLB English": "Do you have a pencil?",
+      "en": "have",
+      "en_sense_gloss": "1. to possess",
+      "m1_extension": true,
+      "query": "Cậu ___ bút chì không? Cho tớ mượn.",
+      "stratum": "nonsino",
+      "vi": "có"
+    },
+    {
+      "NLLB English": "President of the Republic of Vietnam",
+      "en": "president",
+      "en_sense_gloss": "the head of state of a republic",
+      "m1_extension": false,
+      "query": "___ của Việt Nam Cộng hoà",
+      "stratum": "sino",
+      "vi": "tổng thống"
+    },
+    {
+      "NLLB English": "Wear helmets when riding motorcycles, motorcycles.",
+      "en": "helmet",
+      "en_sense_gloss": "protective head covering",
+      "m1_extension": false,
+      "query": "đội ___ khi đi xe mô-tô, xe gắn máy",
+      "stratum": "nonsino",
+      "vi": "mũ bảo hiểm"
+    },
+    {
+      "NLLB English": "I said, \"Where's the shower, sweetheart",
+      "en": "point",
+      "en_sense_gloss": "to extend finger",
+      "m1_extension": false,
+      "query": "Chị hỏi \"Tắm ở đâu, mấy cưng ?\". Tôi ___ xuống kinh.",
+      "stratum": "sino",
+      "vi": "chỉ"
+    },
+    {
+      "NLLB English": "The art of a famous musician has to give way over time.",
+      "en": "famous",
+      "en_sense_gloss": "well known",
+      "m1_extension": false,
+      "query": "Chất nghệ của nhạc sĩ ___ một thời rồi cũng phải chịu thua với thời gian mà thôi.",
+      "stratum": "nonsino",
+      "vi": "nổi tiếng"
+    },
+    {
+      "NLLB English": "First the devil, second the ghost, third the student.",
+      "en": "demon",
+      "en_sense_gloss": "evil being",
+      "m1_extension": false,
+      "query": "nhất ___, nhì ma, thứ ba học trò",
+      "stratum": "sino",
+      "vi": "quỷ"
+    },
+    {
+      "NLLB English": "The climatic characteristics of a region.",
+      "en": "characteristic",
+      "en_sense_gloss": "distinguishing feature",
+      "m1_extension": false,
+      "query": "Những ___ khí hậu của một vùng.",
+      "stratum": "sino",
+      "vi": "đặc điểm"
+    },
+    {
+      "NLLB English": "Yesterday I went to school, I took my step-by-ste",
+      "en": "yesterday",
+      "en_sense_gloss": "day before today",
+      "m1_extension": false,
+      "query": "___ em tới trường, Mẹ dắt tay từng bước ớ ơ. Hôm nay mẹ lên nương, Một mình em đến lớp.",
+      "stratum": "nonsino",
+      "vi": "hôm qua"
+    },
+    {
+      "NLLB English": "Safety is your friend, accidents are your enemy.",
+      "en": "safety",
+      "en_sense_gloss": "condition or feeling of being safe",
+      "m1_extension": false,
+      "query": "___ là bạn, tai nạn là thù.",
+      "stratum": "sino",
+      "vi": "an toàn"
+    },
+    {
+      "NLLB English": "This video has subtitles in over a dozen languages.",
+      "en": "subtitle",
+      "en_sense_gloss": "textual versions of the dialog in films",
+      "m1_extension": false,
+      "query": "Cái video này có ___ hơn chục thứ tiếng.",
+      "stratum": "ambiguous",
+      "vi": "phụ đề"
+    },
+    {
+      "NLLB English": "Cut two dozen hairs, shave your face with 10,000 earpl",
+      "en": "shave",
+      "en_sense_gloss": "to remove hair from",
+      "m1_extension": true,
+      "query": "Cắt tóc hết 2 chục. ___ mặt với lấy ráy tai thêm 10 nghìn. Tổng cộng 3 chục.",
+      "stratum": "nonsino",
+      "vi": "cạo"
+    },
+    {
+      "NLLB English": "Security Council of the United Nations",
+      "en": "council",
+      "en_sense_gloss": "committee that leads or governs",
+      "m1_extension": false,
+      "query": "___ Bảo an Liên hợp quốc",
+      "stratum": "sino",
+      "vi": "hội đồng"
+    },
+    {
+      "NLLB English": "respect for the sovereignty of a country",
+      "en": "sovereignty",
+      "en_sense_gloss": "of a nation or other polity: the state of being able to control resources, make laws independently, and otherwise govern itself without the coercion or concurrence of other polities",
+      "m1_extension": false,
+      "query": "tôn trọng ___ của một nước",
+      "stratum": "ambiguous",
+      "vi": "chủ quyền"
+    },
+    {
+      "NLLB English": "Volcanoes... volcanoes; paint fires.",
+      "en": "volcano",
+      "en_sense_gloss": "mountain containing a magma chamber",
+      "m1_extension": false,
+      "query": "Volcan … ___ ; hỏa diệm sơn.",
+      "stratum": "ambiguous",
+      "vi": "núi lửa"
+    },
+    {
+      "NLLB English": "Genesis 24:16, 2011 Vietnamese translation from BD2011 version; 2021 English translation",
+      "en": "virgin",
+      "en_sense_gloss": "person who has never had sexual intercourse",
+      "m1_extension": false,
+      "query": "Genesis 24:16, 2011 Vietnamese translation from BD2011 version; 2021 English translation from the New Revised Standard Version Updated Edition Nàng là một thiếu nữ rất xinh đẹp, một ___, chưa hề biết người nam nào. Nàng đi xuống chỗ giếng nước, lấy đầy một vò nước, rồi đi lên. The young woman was very fair to look upon, a virgin, whom no man had known. She went down to the spring, filled her jar, and came up.",
+      "stratum": "ambiguous",
+      "vi": "trinh nữ"
+    },
+    {
+      "NLLB English": "The Buddha teaches the Bhikkhus seven methods for restraining and",
+      "en": "method",
+      "en_sense_gloss": "process by which a task is completed",
+      "m1_extension": false,
+      "query": "2002, Thích nữ Trí Hải, “Toát yếu Kinh Trung Bộ”, page 20: Phật dạy các tỷ kheo bảy ___ để chế ngự và từ bỏ ô nhiễm. The Buddha teaches the Bhikkhus seven methods for restraining and abandoning the taints.",
+      "stratum": "sino",
+      "vi": "phương pháp"
+    },
+    {
+      "NLLB English": "My hobbies are fishing, cycling, and reading comics.",
+      "en": "hobby",
+      "en_sense_gloss": "activity done for enjoyment in spare time",
+      "m1_extension": false,
+      "query": "___ của mình là câu cá, đạp xe và đọc truyện tranh.",
+      "stratum": "ambiguous",
+      "vi": "sở thích"
+    },
+    {
+      "NLLB English": "We've got to get the bedroom cleaned for dinner.",
+      "en": "bedroom",
+      "en_sense_gloss": "room in a house where a bed is kept for sleeping",
+      "m1_extension": false,
+      "query": "Bữa nay phải dọn ___ nghe chưa.",
+      "stratum": "nonsino",
+      "vi": "phòng ngủ"
+    },
+    {
+      "NLLB English": "A hotel near the Statue of Liberty.",
+      "en": "monument",
+      "en_sense_gloss": "structure built for commemorative or symbolic reasons",
+      "m1_extension": false,
+      "query": "Một khách sạn gần ___ Độc lập.",
+      "stratum": "ambiguous",
+      "vi": "tượng đài"
+    },
+    {
+      "NLLB English": "His wife was later diagnosed with paranoid schizophrenia,",
+      "en": "schizophrenia",
+      "en_sense_gloss": "mental disorder",
+      "m1_extension": false,
+      "query": "Về sau qua giám định, vợ anh ta bị phát hiện mắc chứng ___ thể hoang tưởng, khi xảy ra vụ án thì không có năng lực trách nhiêm hình sự, do đó được đưa vào Bệnh viện Tâm thần thành phố để điều trị.",
+      "stratum": "nonsino",
+      "vi": "tâm thần phân liệt"
+    },
+    {
+      "NLLB English": "Translate from English to Vietnamese",
+      "en": "translate",
+      "en_sense_gloss": "to change spoken words or written text from one language to another",
+      "m1_extension": true,
+      "query": "___ tiếng Anh ra tiếng Việt",
+      "stratum": "sino",
+      "vi": "dịch"
+    },
+    {
+      "NLLB English": "have an inherited immunodeficiency disorder.",
+      "en": "syndrome",
+      "en_sense_gloss": "recognizable pattern of symptoms or behaviours",
+      "m1_extension": false,
+      "query": "___ suy giảm miễn dịch mắc phải",
+      "stratum": "ambiguous",
+      "vi": "hội chứng"
+    },
+    {
+      "NLLB English": "fight for an independent and free country.",
+      "en": "struggle",
+      "en_sense_gloss": "to strive, to labour in difficulty, to fight",
+      "m1_extension": false,
+      "query": "___ cho đất nước được độc lập và tự do",
+      "stratum": "sino",
+      "vi": "đấu tranh"
+    },
+    {
+      "NLLB English": "tourism contributes a huge part to the city's economy.",
+      "en": "tourism",
+      "en_sense_gloss": "the act of travelling or sightseeing",
+      "m1_extension": false,
+      "query": "___ đóng góp một phần không nhỏ vào kinh tế thành phố.",
+      "stratum": "sino",
+      "vi": "du lịch"
+    },
+    {
+      "NLLB English": "Do you want some dessert?",
+      "en": "dessert",
+      "en_sense_gloss": "sweet confection served as the last course of a meal",
+      "m1_extension": false,
+      "query": "Có gì ___ không ? Có chuối.",
+      "stratum": "nonsino",
+      "vi": "tráng miệng"
+    }
+  ],
+  "survivor_sample_seed": 20260925
+}
