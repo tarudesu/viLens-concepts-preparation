@@ -1,0 +1,54 @@
+{
+  "rows": [
+    {
+      "concept_id": "aligned",
+      "vi_canonical": "học",
+      "en_lemma": "study",
+      "sense_gloss": "the act of learning",
+      "pos": "noun",
+      "stratum": "nonsino",
+      "m1_extension": false,
+      "split": "test"
+    },
+    {
+      "concept_id": "fallback",
+      "vi_canonical": "dở dang",
+      "en_lemma": "unfinished",
+      "sense_gloss": "incomplete",
+      "pos": "adjective",
+      "stratum": "ambiguous",
+      "m1_extension": false,
+      "split": "test"
+    }
+  ],
+  "entries_by_key": {
+    "học": [
+      {
+        "word": "học",
+        "pos": "noun",
+        "senses": [
+          {
+            "glosses": ["a school"],
+            "examples": [{"text": "The old unrelated example."}]
+          },
+          {
+            "glosses": ["study"],
+            "examples": [{"text": "Học is important."}]
+          }
+        ]
+      }
+    ],
+    "dở dang": [
+      {
+        "word": "dở dang",
+        "pos": "adjective",
+        "senses": [
+          {
+            "glosses": ["unfinished work"],
+            "examples": [{"text": "The task remains dở dang."}]
+          }
+        ]
+      }
+    ]
+  }
+}

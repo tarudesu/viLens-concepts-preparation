@@ -1,0 +1,1084 @@
+"""Build auditable v1.3 Vietnamese cloze candidates and prompt records."""
+
+from __future__ import annotations
+
+import csv
+import json
+import logging
+import re
+import unicodedata
+from collections import Counter, defaultdict
+from pathlib import Path
+from typing import Any, Callable, Iterable
+
+import numpy as np
+
+try:
+    from common import iter_jsonl, normalize_nfc, strip_diacritics, vi_orth_key
+except ModuleNotFoundError:
+    from data.build.common import iter_jsonl, normalize_nfc, strip_diacritics, vi_orth_key
+
+
+RULES = ("C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8")
+FORBIDDEN = frozenset("()[]/|~")
+
+
+def clean_example_text(value: str) -> str:
+    """Normalize NFC and collapse whitespace to one line with single spaces."""
+    return " ".join(normalize_nfc(value).split())
+
+
+def _punctuation_edges(token: str) -> tuple[str, int, int]:
+    """Return a token's non-punctuation core and its offsets."""
+    start, end = 0, len(token)
+    while start < end and unicodedata.category(token[start]).startswith("P"):
+        start += 1
+    while end > start and unicodedata.category(token[end - 1]).startswith("P"):
+        end -= 1
+    return token[start:end], start, end
+
+
+def exact_occurrences(text: str, canonical: str) -> list[tuple[int, int]]:
+    """Find case-insensitive canonical forms on whitespace-delimited syllable boundaries."""
+    normalized = normalize_nfc(text)
+    syllables = normalize_nfc(canonical).casefold().split()
+    if not syllables:
+        raise ValueError("Cannot search for an empty Vietnamese canonical form")
+    tokens = list(re.finditer(r"\S+", normalized))
+    cores = [_punctuation_edges(match.group(0)) for match in tokens]
+    found: list[tuple[int, int]] = []
+    for start in range(len(tokens) - len(syllables) + 1):
+        window = cores[start:start + len(syllables)]
+        if [core.casefold() for core, _, _ in window] != syllables or any(not core for core, _, _ in window):
+            continue
+        left = tokens[start].start() + window[0][1]
+        right = tokens[start + len(syllables) - 1].start() + window[-1][2]
+        found.append((left, right))
+    return found
+
+
+def mask_exactly_once(
+    text: str,
+    canonical: str,
+    *,
+    min_occurrences: int = 1,
+    max_occurrences: int = 1,
+) -> tuple[str | None, int]:
+    """Mask a canonical occurrence when its count is within the configured range."""
+    if min_occurrences < 0 or max_occurrences < min_occurrences:
+        raise ValueError("Invalid canonical occurrence bounds")
+    normalized = normalize_nfc(text)
+    occurrences = exact_occurrences(normalized, canonical)
+    if not min_occurrences <= len(occurrences) <= max_occurrences:
+        return None, len(occurrences)
+    if len(occurrences) != 1:
+        raise ValueError("C3 can mask only one occurrence")
+    start, end = occurrences[0]
+    return normalized[:start] + "___" + normalized[end:], 1
+
+
+def compound_headword_conflict(query: str, canonical: str, headwords: set[str]) -> str | None:
+    """Return an adjacent-syllable Wiktextract headword that conflicts with the blank."""
+    tokens = list(re.finditer(r"\S+", query))
+    blank_index: int | None = None
+    cores = [_punctuation_edges(match.group(0))[0] for match in tokens]
+    for index, core in enumerate(cores):
+        raw_token = tokens[index].group(0)
+        if raw_token.count("___") == 1:
+            blank_start = raw_token.index("___")
+            prefix = raw_token[:blank_start]
+            suffix = raw_token[blank_start + 3:]
+            if not all(unicodedata.category(char).startswith("P") for char in prefix + suffix):
+                continue
+            if blank_index is not None:
+                raise ValueError("Compound check requires a query with exactly one blank")
+            blank_index = index
+    if blank_index is None:
+        raise ValueError("Compound check could not locate the cloze blank")
+
+    left = cores[blank_index - 1] if blank_index > 0 else ""
+    right = cores[blank_index + 1] if blank_index + 1 < len(cores) else ""
+    target_key = vi_orth_key(canonical)
+    combinations: list[str] = []
+    if left:
+        combinations.append(f"{left} {canonical}")
+    if right:
+        combinations.append(f"{canonical} {right}")
+    if left and right:
+        combinations.append(f"{left} {canonical} {right}")
+    for combined in combinations:
+        key = vi_orth_key(combined)
+        if key != target_key and key in headwords:
+            return normalize_nfc(combined)
+    return None
+
+
+def lemma_tokens(doc: Any) -> tuple[str, ...]:
+    """Return lowercased spaCy lemmas with punctuation and spaces removed."""
+    return tuple(
+        normalize_nfc(token.lemma_).casefold()
+        for token in doc
+        if not token.is_space and not token.is_punct and token.lemma_
+    )
+
+
+def contains_lemma_sequence(output: Iterable[str], phrase: Iterable[str]) -> bool:
+    """Return whether one lemma sequence occurs contiguously in another."""
+    words, target = tuple(output), tuple(phrase)
+    if not target or len(target) > len(words):
+        return False
+    return any(words[index:index + len(target)] == target for index in range(len(words) - len(target) + 1))
+
+
+def _scope_vi_entries(entries: list[dict[str, Any]], pos: str) -> list[dict[str, Any]]:
+    """Use exact-POS homographs when available, otherwise all matching entries."""
+    matching = [entry for entry in entries if normalize_nfc(entry["pos"]) == normalize_nfc(pos)]
+    return matching if matching else entries
+
+
+def stream_vi_entries_and_headwords(
+    path: str | Path,
+    wanted_keys: set[str],
+    *,
+    progress_every: int,
+    logger: logging.Logger,
+) -> tuple[dict[str, list[dict[str, Any]]], set[str]]:
+    """Stream the Vietnamese dump, retaining requested entries and all headword keys."""
+    if progress_every < 1:
+        raise ValueError("progress_every must be at least one")
+    found: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    headwords: set[str] = set()
+    entry_count = 0
+    for entry_count, entry in enumerate(iter_jsonl(path), start=1):
+        if not isinstance(entry, dict):
+            raise ValueError(f"Vietnamese dump record {entry_count} is not an object")
+        word, pos = entry.get("word"), entry.get("pos")
+        if not isinstance(word, str) or not word.strip() or not isinstance(pos, str) or not pos.strip():
+            raise ValueError(f"Vietnamese dump record {entry_count} lacks a non-empty word/pos")
+        key = vi_orth_key(word)
+        headwords.add(key)
+        if key in wanted_keys:
+            found[key].append(entry)
+        if entry_count % progress_every == 0:
+            logger.info("Streamed Vietnamese entries for v1.3 cloze: %d", entry_count)
+    logger.info("Streamed Vietnamese entries for v1.3 cloze: %d (end of dump)", entry_count)
+    missing = sorted(wanted_keys - set(found))
+    if missing:
+        raise ValueError(f"Requested Vietnamese forms have no Wiktextract entries: {missing[:20]!r}")
+    return dict(found), headwords
+
+
+def collect_example_candidates(
+    rows: list[dict[str, Any]],
+    entries_by_key: dict[str, list[dict[str, Any]]],
+    *,
+    contains_whole_word: Callable[[str, str], bool],
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Collect all example records and mark the C1 aligned-sense eligibility."""
+    candidates: list[dict[str, Any]] = []
+    empty_concepts: dict[str, int] = {}
+    for row in sorted(rows, key=lambda item: item["concept_id"]):
+        concept_id = row["concept_id"]
+        canonical = normalize_nfc(row["vi_canonical"]).strip()
+        english = normalize_nfc(row["en_lemma"]).strip()
+        pos = normalize_nfc(row["pos"]).strip()
+        key = vi_orth_key(canonical)
+        entries = entries_by_key[key]
+        scoped = _scope_vi_entries(entries, pos)
+        per_entry_senses: list[list[dict[str, Any]]] = []
+        matched_senses: set[tuple[int, int]] = set()
+        for entry_index, entry in enumerate(scoped):
+            senses = entry.get("senses", [])
+            if senses is None:
+                senses = []
+            if not isinstance(senses, list) or any(not isinstance(sense, dict) for sense in senses):
+                raise ValueError(f"Malformed Vietnamese senses on entry {entry.get('word')!r}")
+            per_entry_senses.append(senses)
+            for sense_index, sense in enumerate(senses):
+                glosses = sense.get("glosses", [])
+                if glosses is None:
+                    glosses = []
+                if not isinstance(glosses, list) or any(not isinstance(gloss, str) for gloss in glosses):
+                    raise ValueError(f"Malformed senses[].glosses on entry {entry.get('word')!r}")
+                if any(contains_whole_word(english, gloss) for gloss in glosses):
+                    matched_senses.add((entry_index, sense_index))
+
+        if matched_senses:
+            allowed_senses = matched_senses
+        else:
+            allowed_senses = {
+                (entry_index, 0)
+                for entry_index, senses in enumerate(per_entry_senses)
+                if len(senses) == 1
+            }
+
+        before_count = len(candidates)
+        for entry_index, (entry, senses) in enumerate(zip(scoped, per_entry_senses)):
+            for sense_index, sense in enumerate(senses):
+                examples = sense.get("examples", [])
+                if examples is None:
+                    examples = []
+                if not isinstance(examples, list):
+                    raise ValueError(f"Unexpected examples on Vietnamese sense of {entry.get('word')!r}")
+                for example_index, example in enumerate(examples):
+                    if not isinstance(example, dict):
+                        raise ValueError(f"Malformed Wiktionary example on {entry.get('word')!r}: {example!r}")
+                    text = example.get("text")
+                    if text is not None and not isinstance(text, str):
+                        raise ValueError(f"Vietnamese example text is not a string on {entry.get('word')!r}: {example!r}")
+                    candidates.append({
+                        "candidate_id": f"{concept_id}:{entry_index}:{sense_index}:{example_index}",
+                        "concept_id": concept_id,
+                        "vi": canonical,
+                        "en": english,
+                        "en_sense_gloss": normalize_nfc(row.get("sense_gloss", "")),
+                        "pos": pos,
+                        "stratum": row.get("stratum", ""),
+                        "m1_extension": bool(row.get("m1_extension", False)),
+                        "split": row["split"],
+                        "fewshot_set": row.get("fewshot_set"),
+                        "entry_word": normalize_nfc(entry["word"]),
+                        "sense_index": sense_index,
+                        "example_index": example_index,
+                        "example_text": text if text is not None else "",
+                        "c1_allowed": (entry_index, sense_index) in allowed_senses,
+                    })
+        empty_concepts[concept_id] = len(candidates) - before_count
+    return candidates, empty_concepts
+
+
+def _failure(candidate: dict[str, Any], rule: str, reason: str) -> dict[str, Any]:
+    """Render one rejected-example audit record."""
+    return {
+        "candidate_id": candidate["candidate_id"],
+        "concept_id": candidate["concept_id"],
+        "vi": candidate.get("vi", ""),
+        "en": candidate.get("en", ""),
+        "entry_word": candidate.get("entry_word", ""),
+        "sense_index": candidate.get("sense_index"),
+        "example_index": candidate.get("example_index"),
+        "example_text": candidate.get("example_text", ""),
+        "query": candidate.get("query", ""),
+        "failed_rule": rule,
+        "reason": reason,
+        "nllb_english": candidate.get("nllb_english", []),
+    }
+
+
+def _scope_name(candidate: dict[str, Any]) -> str:
+    """Return the reporting group for test or demonstration candidates."""
+    if candidate["split"] == "test":
+        return "extension" if candidate["m1_extension"] else "main"
+    return f"fewshot_set_{candidate.get('fewshot_set')}"
+
+
+def _stage_counts(candidates: list[dict[str, Any]]) -> dict[str, int]:
+    return dict(Counter(_scope_name(candidate) for candidate in candidates))
+
+
+def filter_cloze_candidates_c1_to_c7(
+    candidates: list[dict[str, Any]],
+    *,
+    headwords: set[str],
+    forbidden_characters: Iterable[str],
+    min_query_tokens: int,
+    min_occurrences: int,
+    max_occurrences: int,
+    use_all_returned_beams: bool,
+    spacy_batch_size: int,
+    translator: Any,
+    nlp: Any,
+    wordnet_reader: Any,
+    step08: Any,
+    source_code: str,
+    target_code: str,
+) -> tuple[
+    list[dict[str, Any]], dict[str, dict[str, int]], list[dict[str, Any]],
+    dict[str, dict[str, int]], dict[str, int], dict[str, dict[str, Counter[str]]],
+]:
+    """Apply the ordered content rules C1–C7 and return survivors and audit counts."""
+    current = sorted(candidates, key=lambda row: row["candidate_id"])
+    counts: dict[str, dict[str, int]] = {"candidates": _stage_counts(current)}
+    pos_counts: dict[str, dict[str, Counter[str]]] = {"candidates": defaultdict(Counter)}
+    failures: list[dict[str, Any]] = []
+    per_concept: dict[str, dict[str, int]] = defaultdict(dict)
+    for candidate in current:
+        per_concept[candidate["concept_id"]]["candidates"] = per_concept[candidate["concept_id"]].get("candidates", 0) + 1
+        pos_counts["candidates"][_scope_name(candidate)][candidate["pos"]] += 1
+
+    def apply_rule(rule: str, predicate: Callable[[dict[str, Any]], tuple[bool, str]]) -> None:
+        nonlocal current
+        passed: list[dict[str, Any]] = []
+        for candidate in current:
+            keep, reason = predicate(candidate)
+            if keep:
+                passed.append(candidate)
+            else:
+                failures.append(_failure(candidate, rule, reason))
+        current = passed
+        counts[f"after_{rule}"] = _stage_counts(current)
+        pos_counts[f"after_{rule}"] = defaultdict(Counter)
+        for candidate in candidates:
+            per_concept[candidate["concept_id"]][f"after_{rule}"] = 0
+        for candidate in current:
+            per_concept[candidate["concept_id"]][f"after_{rule}"] = per_concept[candidate["concept_id"]].get(f"after_{rule}", 0) + 1
+            pos_counts[f"after_{rule}"][_scope_name(candidate)][candidate["pos"]] += 1
+
+    apply_rule("C1", lambda candidate: (bool(candidate["c1_allowed"]), "no English-gloss-matched sense; entry is not single-sense"))
+
+    def c2(candidate: dict[str, Any]) -> tuple[bool, str]:
+        cleaned = clean_example_text(candidate["example_text"])
+        candidate["clean_text"] = cleaned
+        return bool(cleaned) and "\n" not in cleaned and "\r" not in cleaned, "empty or non-single-line example after whitespace cleanup"
+
+    apply_rule("C2", c2)
+
+    def c3(candidate: dict[str, Any]) -> tuple[bool, str]:
+        query, occurrence_count = mask_exactly_once(
+            candidate["clean_text"], candidate["vi"],
+            min_occurrences=min_occurrences, max_occurrences=max_occurrences,
+        )
+        candidate["occurrence_count"] = occurrence_count
+        candidate["query"] = query or ""
+        if occurrence_count != 1:
+            return False, f"canonical Vietnamese form occurs {occurrence_count} times; expected exactly one"
+        start, end = exact_occurrences(candidate["clean_text"], candidate["vi"])[0]
+        candidate["filled_sentence"] = candidate["clean_text"][:start] + candidate["vi"] + candidate["clean_text"][end:]
+        return True, ""
+
+    apply_rule("C3", c3)
+
+    def c4(candidate: dict[str, Any]) -> tuple[bool, str]:
+        candidate["token_count"] = len(candidate["query"].split())
+        return candidate["token_count"] >= min_query_tokens, f"query has {candidate['token_count']} whitespace tokens; minimum is {min_query_tokens}"
+
+    apply_rule("C4", c4)
+
+    forbidden = frozenset(forbidden_characters)
+
+    def c5(candidate: dict[str, Any]) -> tuple[bool, str]:
+        found = sorted(set(candidate["clean_text"]).intersection(forbidden))
+        return not found, f"query contains forbidden character(s): {''.join(found)}"
+
+    apply_rule("C5", c5)
+
+    def c6(candidate: dict[str, Any]) -> tuple[bool, str]:
+        conflict = compound_headword_conflict(candidate["query"], candidate["vi"], headwords)
+        candidate["compound_headword"] = conflict
+        return conflict is None, f"blank plus adjacent syllable(s) forms Wiktextract headword {conflict!r}" if conflict else ""
+
+    apply_rule("C6", c6)
+
+    english_requests = [(source_code, target_code, candidate["filled_sentence"]) for candidate in current]
+    translations = translator.translate_many(english_requests) if english_requests else {}
+    request_key_by_candidate = {
+        candidate["candidate_id"]: (source_code, target_code, normalize_nfc(candidate["filled_sentence"]))
+        for candidate in current
+    }
+    output_texts = sorted({
+        output
+        for values in translations.values()
+        for output in values
+    })
+
+    english_by_target: dict[str, set[tuple[str, ...]]] = {}
+    for english in sorted({candidate["en"] for candidate in current}):
+        target_doc = nlp(english)
+        target_words = lemma_tokens(target_doc)
+        if not target_words:
+            raise ValueError(f"spaCy produced no English lemmas for target {english!r}")
+        terms = {english, *step08.wordnet_synonyms(wordnet_reader, english)}
+        target_sequences: set[tuple[str, ...]] = set()
+        for term in terms:
+            term_doc = nlp(term)
+            term_words = lemma_tokens(term_doc)
+            if term_words:
+                target_sequences.add(term_words)
+        if len(target_words) == 2:
+            lexical = [token for token in target_doc if not token.is_space and not token.is_punct]
+            roots = [token for token in lexical if token.head == token]
+            head = roots[-1] if roots else lexical[-1]
+            target_sequences.add((normalize_nfc(head.lemma_).casefold(),))
+        english_by_target[english] = target_sequences
+
+    # Batch parse translations for throughput while retaining the same spaCy lemmas per text.
+    output_lemmas: dict[str, tuple[str, ...]] = {}
+    if spacy_batch_size < 1:
+        raise ValueError("spacy_batch_size must be positive")
+    for text, doc in zip(output_texts, nlp.pipe(output_texts, batch_size=spacy_batch_size)):
+        output_lemmas[text] = lemma_tokens(doc)
+
+    semantic_survivors: list[dict[str, Any]] = []
+    for candidate in current:
+        key = request_key_by_candidate[candidate["candidate_id"]]
+        outputs = translations[key]
+        candidate["nllb_english"] = outputs
+        beam_outputs = outputs if use_all_returned_beams else outputs[:1]
+        matched = any(
+            contains_lemma_sequence(output_lemmas[output], phrase)
+            for output in beam_outputs
+            for phrase in english_by_target[candidate["en"]]
+        )
+        if matched:
+            semantic_survivors.append(candidate)
+        else:
+            failures.append(_failure(candidate, "C7", "no configured NLLB beam contains the English lemma, two-word head lemma, or WordNet synonym"))
+    current = semantic_survivors
+    counts["after_C7"] = _stage_counts(current)
+    pos_counts["after_C7"] = defaultdict(Counter)
+    for candidate in candidates:
+        per_concept[candidate["concept_id"]]["after_C7"] = 0
+    for candidate in current:
+        per_concept[candidate["concept_id"]]["after_C7"] = per_concept[candidate["concept_id"]].get("after_C7", 0) + 1
+        pos_counts["after_C7"][_scope_name(candidate)][candidate["pos"]] += 1
+    nllb_stats = {
+        "requests": len(english_requests),
+        "unique_requests": len(set(request_key_by_candidate.values())),
+        "outputs": len(output_texts),
+    }
+    return (
+        current, counts, failures, {key: dict(value) for key, value in per_concept.items()},
+        nllb_stats, pos_counts,
+    )
+
+
+def query_owner_map(candidates: list[dict[str, Any]]) -> dict[str, set[str]]:
+    """Map each masked query to its distinct concept owners."""
+    owners: dict[str, set[str]] = defaultdict(set)
+    for candidate in candidates:
+        owners[candidate["query"]].add(candidate["concept_id"])
+    return dict(owners)
+
+
+def select_demo_concept_ids(
+    *,
+    candidate_rows: list[dict[str, Any]],
+    fewshot_sets: dict[int, list[dict[str, Any]]],
+    preferred_vi: list[str],
+    demo_count: int,
+    fallback_set: int,
+    seed: int,
+    test_rows: list[dict[str, Any]],
+) -> list[str]:
+    """Select distinct passing demonstrations, preferring set 1 and seeded set 2 fallback."""
+    c1_c7_ids = {candidate["concept_id"] for candidate in candidate_rows}
+    test_ids = {row["concept_id"] for row in test_rows}
+    target_candidates = [candidate for candidate in candidate_rows if candidate["concept_id"] in test_ids]
+    target_owners = query_owner_map(target_candidates)
+
+    first_set = fewshot_sets.get(1, [])
+    preferred_ids: list[str] = []
+    for preferred_form in preferred_vi:
+        for row in first_set:
+            if normalize_nfc(row["vi_canonical"]).casefold() == normalize_nfc(preferred_form).casefold():
+                if row["concept_id"] in c1_c7_ids and row["concept_id"] not in preferred_ids:
+                    preferred_ids.append(row["concept_id"])
+    set1_ids = preferred_ids + [
+        row["concept_id"] for row in first_set
+        if row["concept_id"] in c1_c7_ids and row["concept_id"] not in preferred_ids
+    ]
+
+    fallback_rows = fewshot_sets.get(fallback_set, [])
+    sorted_fallback = sorted(fallback_rows, key=lambda row: row["concept_id"])
+    rng = np.random.default_rng(seed)
+    fallback_ids = [sorted_fallback[index]["concept_id"] for index in rng.permutation(len(sorted_fallback)).tolist()]
+    fallback_ids = [concept_id for concept_id in fallback_ids if concept_id in c1_c7_ids]
+
+    ordered_ids = set1_ids + [concept_id for concept_id in fallback_ids if concept_id not in set1_ids]
+    selected: list[str] = []
+    selected_candidates: list[dict[str, Any]] = []
+    candidates_by_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for candidate in candidate_rows:
+        candidates_by_id[candidate["concept_id"]].append(candidate)
+    for concept_id in ordered_ids:
+        potential = candidates_by_id[concept_id]
+        selected_ids = set(selected)
+        selected_owners = query_owner_map(selected_candidates)
+        has_nonconflicting_query = any(
+            not (target_owners.get(candidate["query"], set()) - {concept_id})
+            and not (selected_owners.get(candidate["query"], set()) - {concept_id})
+            for candidate in potential
+        )
+        if not has_nonconflicting_query:
+            continue
+        selected.append(concept_id)
+        selected_candidates.extend(potential)
+        if len(selected) == demo_count:
+            break
+    return selected
+
+
+def apply_c8(
+    candidates: list[dict[str, Any]],
+    *,
+    per_concept_counts: dict[str, dict[str, int]],
+    prior_failures: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, dict[str, int]]]:
+    """Drop every surviving candidate query shared by a different concept."""
+    owners = query_owner_map(candidates)
+    kept: list[dict[str, Any]] = []
+    failures = list(prior_failures)
+    for candidate in candidates:
+        other_owners = owners[candidate["query"]] - {candidate["concept_id"]}
+        if other_owners:
+            failures.append(_failure(
+                candidate, "C8",
+                f"masked query is also used by concept(s): {', '.join(sorted(other_owners))}",
+            ))
+        else:
+            kept.append(candidate)
+    for values in per_concept_counts.values():
+        values["after_C8"] = 0
+    for candidate in kept:
+        concept_counts = per_concept_counts.setdefault(candidate["concept_id"], {})
+        concept_counts["after_C8"] = concept_counts.get("after_C8", 0) + 1
+    return kept, failures, per_concept_counts
+
+
+def choose_examples(candidates: list[dict[str, Any]], *, preferred_min_tokens: int) -> dict[str, dict[str, Any]]:
+    """Choose the shortest ≥ configured preference, else longest; lexical query breaks ties."""
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for candidate in candidates:
+        grouped[candidate["concept_id"]].append(candidate)
+    selected: dict[str, dict[str, Any]] = {}
+    for concept_id, group in grouped.items():
+        preferred = [candidate for candidate in group if candidate["token_count"] >= preferred_min_tokens]
+        if preferred:
+            selected[concept_id] = min(preferred, key=lambda item: (item["token_count"], item["query"]))
+        else:
+            longest = max(candidate["token_count"] for candidate in group)
+            selected[concept_id] = min(
+                (candidate for candidate in group if candidate["token_count"] == longest),
+                key=lambda item: item["query"],
+            )
+    return selected
+
+
+def first_empty_rule(stage_counts: dict[str, int]) -> str:
+    """Return the first C1–C8 stage that removes a concept's final candidate."""
+    if stage_counts.get("candidates", 0) == 0:
+        return "C1"
+    for rule in RULES:
+        if stage_counts.get(f"after_{rule}", 0) == 0:
+            return rule
+    return ""
+
+
+def old_query_from_prompt(prompt: str, answer_label: str) -> str:
+    """Extract the final v1.2 query, preserving old multiline queries for the audit CSV."""
+    lines = prompt.splitlines(keepends=True)
+    answer_prefix = f"{answer_label} "
+    answer_indexes = [index for index, line in enumerate(lines) if line.rstrip("\r\n").startswith(answer_prefix)]
+    if len(answer_indexes) != 3 or not lines or lines[-1].rstrip("\r\n") != answer_label:
+        raise ValueError("Unexpected v1.2 cloze prompt layout while reading its old query")
+    query_start = sum(len(line) for line in lines[:answer_indexes[-1] + 1])
+    query_end = sum(len(line) for line in lines[:-1])
+    return prompt[query_start:query_end].rstrip("\r\n")
+
+
+def write_failure_jsonl(path: str | Path, failures: list[dict[str, Any]]) -> None:
+    """Write candidate-level first-failure records as stable UTF-8 JSONL."""
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(f".{output.name}.tmp")
+    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+        for record in sorted(failures, key=lambda item: (item["concept_id"], item["candidate_id"], item["failed_rule"])):
+            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
+    temporary.replace(output)
+
+
+def write_dropped_csv(
+    path: str | Path,
+    *,
+    old_rows: list[dict[str, Any]],
+    selected_by_id: dict[str, dict[str, Any]],
+    per_concept_counts: dict[str, dict[str, int]],
+    answer_label: str,
+) -> list[dict[str, str]]:
+    """Write one row for each v1.2 cloze concept that no longer has a C1–C8 candidate."""
+    dropped: list[dict[str, str]] = []
+    for row in sorted(old_rows, key=lambda item: item["concept_id"]):
+        concept_id = row["concept_id"]
+        if concept_id in selected_by_id:
+            continue
+        counts = per_concept_counts.get(concept_id, {"candidates": 0})
+        rule = first_empty_rule(counts) or "C8"
+        dropped.append({
+            "concept_id": concept_id,
+            "vi": row.get("target_vi", "").strip(),
+            "en": row.get("target_en", "").strip(),
+            "old query": old_query_from_prompt(row["prompt"], answer_label),
+            "failed rule": rule,
+        })
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["concept_id", "vi", "en", "old query", "failed rule"], lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(dropped)
+    return dropped
+
+
+def build_record(
+    row: dict[str, Any],
+    *,
+    prompt: str,
+    condition: str,
+    fewshot_set: int,
+    vi_target: str,
+    demo_concept_ids: list[str],
+) -> dict[str, Any]:
+    """Build a v1.2 prompt row with the v1.3 demonstration provenance field."""
+    targets = {
+        "target_vi": vi_target,
+        "target_en": row["en_lemma"],
+        "target_zh": row["zh_canonical"],
+        "target_fr": row["fr_canonical"],
+        "target_id": row["id_canonical"],
+    }
+    for key, value in list(targets.items()):
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"Missing prompt target {key} for {row['concept_id']!r}")
+        targets[key] = " " + normalize_nfc(value).strip()
+    return {
+        "concept_id": row["concept_id"],
+        "split": row["split"],
+        "m1_extension": bool(row["m1_extension"]),
+        "format": "cloze",
+        "condition": condition,
+        "fewshot_set": fewshot_set,
+        "prompt": prompt,
+        **targets,
+        "demo_concept_ids": list(demo_concept_ids),
+    }
+
+
+def render_prompt(
+    demo_rows: list[dict[str, Any]],
+    *,
+    query: str,
+    answer_label: str,
+) -> str:
+    """Render three cloze demonstrations and the target query in v1.2 format."""
+    lines: list[str] = []
+    for row in demo_rows:
+        lines.extend((row["query"], f"{answer_label} {row['vi']}"))
+    lines.extend((query, answer_label))
+    return "\n".join(lines)
+
+
+def verify_records(
+    records: dict[str, list[dict[str, Any]]],
+    *,
+    rows_by_id: dict[str, dict[str, Any]],
+    demo_concept_ids: list[str],
+    answer_label: str,
+    primary_set: int,
+) -> None:
+    """Assert the v1.2 cloze schema plus demo IDs and the task's prompt invariants."""
+    expected_fields = {
+        "concept_id", "split", "m1_extension", "format", "condition", "fewshot_set", "prompt",
+        "target_vi", "target_en", "target_zh", "target_fr", "target_id", "demo_concept_ids",
+    }
+    for condition in ("diac", "nodiac"):
+        condition_answer_label = answer_label if condition == "diac" else strip_diacritics(answer_label, preserve_case=True)
+        for record in records.get(condition, []):
+            if set(record) != expected_fields:
+                raise AssertionError(f"Unexpected cloze {condition} schema: {sorted(record)!r}")
+            if record["demo_concept_ids"] != demo_concept_ids:
+                raise AssertionError(f"Cloze demo provenance changed on {record['concept_id']!r}")
+            if record["condition"] != condition or record["format"] != "cloze" or record["fewshot_set"] != primary_set:
+                raise AssertionError(f"Unexpected cloze prompt metadata on {record['concept_id']!r}")
+            lines = record["prompt"].splitlines()
+            if len(lines) != 8 or lines[-1] != condition_answer_label:
+                raise AssertionError(f"Unexpected cloze prompt line layout on {record['concept_id']!r}")
+            queries = lines[::2]
+            if len(queries) != 4 or any(query.count("___") != 1 or "\n" in query or "\r" in query for query in queries):
+                raise AssertionError(f"Cloze prompts need four one-blank single-line queries: {record['concept_id']!r}")
+            if any(not lines[index].startswith(f"{condition_answer_label} ") for index in (1, 3, 5)):
+                raise AssertionError(f"Cloze demonstrations lack answer lines on {record['concept_id']!r}")
+            row = rows_by_id[record["concept_id"]]
+            vi_target = row["vi_canonical"]
+            if condition == "nodiac":
+                vi_target = strip_diacritics(vi_target, preserve_case=True)
+            expected_targets = {
+                "target_vi": vi_target,
+                "target_en": row["en_lemma"],
+                "target_zh": row["zh_canonical"],
+                "target_fr": row["fr_canonical"],
+                "target_id": row["id_canonical"],
+            }
+            for field, target in expected_targets.items():
+                if record[field] != " " + normalize_nfc(target).strip():
+                    raise AssertionError(f"Cloze target {field} mismatches concept fields for {record['concept_id']!r}")
+            if condition == "nodiac" and row.get("collapsed") is True:
+                raise AssertionError(f"Collapsed concept leaked into nodiac cloze: {record['concept_id']!r}")
+
+
+def report_funnel(
+    counts: dict[str, dict[str, int]],
+    *,
+    stage_pos: dict[str, dict[str, Counter[str]]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Format main and extension candidate funnel rows with POS counts."""
+    result: dict[str, list[dict[str, Any]]] = {}
+    for scope in ("main", "extension"):
+        rows: list[dict[str, Any]] = []
+        for stage in ("candidates", *(f"after_{rule}" for rule in RULES)):
+            value = counts.get(scope, {}).get(stage, 0)
+            pos_counts = dict(sorted(stage_pos.get(stage, {}).get(scope, Counter()).items()))
+            rows.append({"stage": stage, "n": value, "n_by_pos": pos_counts})
+        result[scope] = rows
+    return result
+
+
+def build_cloze_v13(
+    *,
+    all_rows: list[dict[str, Any]],
+    test_rows: list[dict[str, Any]],
+    fewshot_sets: dict[int, list[dict[str, Any]]],
+    config: dict[str, Any],
+    translator: Any,
+    step07: Any,
+    step08: Any,
+    attest_matcher: Callable[[str, str], bool],
+    logger: logging.Logger,
+) -> dict[str, Any]:
+    """Build C1–C8 cloze selections, audit files, records, and a deterministic report."""
+    import spacy
+
+    settings = config["prompts"]["cloze_v13"]
+    paths = settings["paths"]
+    fewshot_pool_ids = {
+        row["concept_id"]
+        for set_number in (1, int(settings["fallback_fewshot_set"]))
+        for row in fewshot_sets.get(set_number, [])
+    }
+    rows_by_id = {row["concept_id"]: row for row in all_rows}
+    test_ids = {row["concept_id"] for row in test_rows}
+    if test_ids.intersection(fewshot_pool_ids):
+        raise AssertionError("Test cloze targets overlap the selected few-shot sets")
+    candidate_rows = [rows_by_id[concept_id] for concept_id in sorted(test_ids | fewshot_pool_ids)]
+    wanted_keys = {vi_orth_key(row["vi_canonical"]) for row in candidate_rows}
+    vi_dump = Path(config["etymology"]["paths"]["vietnamese_dump"])
+    entries_by_key, headwords = stream_vi_entries_and_headwords(
+        vi_dump, wanted_keys,
+        progress_every=int(config["logging"]["progress_every"]), logger=logger,
+    )
+    example_candidates, empty_concepts = collect_example_candidates(
+        candidate_rows, entries_by_key, contains_whole_word=attest_matcher,
+    )
+    logger.info("Cloze v1.3 raw example candidates=%d; concepts without example records=%d",
+                len(example_candidates), sum(value == 0 for value in empty_concepts.values()))
+
+    step07_config = {
+        **config["nllb"],
+        "progress_every": int(config["logging"]["progress_every"]),
+    }
+    step08_config = config["etymology"]
+    wordnet_reader, wordnet_version = step08.load_local_wordnet(step08_config["paths"]["nltk_data"])
+    spacy_model = config["concreteness"]["spacy_model"]
+    nlp = spacy.load(spacy_model)
+    logger.info("Cloze v1.3 semantic resources: spaCy=%s; WordNet=%s", spacy_model, wordnet_version)
+
+    source_code = config["nllb"]["lang_codes"]["vi"]
+    target_code = config["nllb"]["lang_codes"]["en"]
+    before_calls = int(getattr(translator, "translation_calls", 0))
+    before_hits = int(getattr(translator, "cache_hits", 0))
+    c1_c7, funnel_counts, failures, per_concept_counts, nllb_stats, stage_pos = filter_cloze_candidates_c1_to_c7(
+        example_candidates,
+        headwords=headwords,
+        forbidden_characters=settings["forbidden_characters"],
+        min_query_tokens=int(settings["min_query_tokens"]),
+        min_occurrences=int(settings["min_canonical_occurrences"]),
+        max_occurrences=int(settings["max_canonical_occurrences"]),
+        use_all_returned_beams=bool(settings["semantic_use_all_returned_beams"]),
+        spacy_batch_size=int(settings["spacy_batch_size"]),
+        translator=translator,
+        nlp=nlp,
+        wordnet_reader=wordnet_reader,
+        step08=step08,
+        source_code=source_code,
+        target_code=target_code,
+    )
+    c1_c7_ids = {candidate["concept_id"] for candidate in c1_c7}
+    demo_ids = select_demo_concept_ids(
+        candidate_rows=c1_c7,
+        fewshot_sets=fewshot_sets,
+        preferred_vi=list(settings["preferred_demo_vi"]),
+        demo_count=int(settings["demo_count"]),
+        fallback_set=int(settings["fallback_fewshot_set"]),
+        seed=int(config["seed"]),
+        test_rows=test_rows,
+    )
+    final_concept_ids = test_ids | set(demo_ids)
+    c8_input = [candidate for candidate in c1_c7 if candidate["concept_id"] in final_concept_ids]
+    per_concept_counts = {
+        concept_id: per_concept_counts.get(concept_id, {"candidates": 0})
+        for concept_id in final_concept_ids
+    }
+    c8_kept, failures, per_concept_counts = apply_c8(
+        c8_input,
+        per_concept_counts=per_concept_counts,
+        prior_failures=failures,
+    )
+    funnel_counts["after_C8"] = _stage_counts(c8_kept)
+    stage_pos["after_C8"] = defaultdict(Counter)
+    for candidate in c8_kept:
+        stage_pos["after_C8"][_scope_name(candidate)][candidate["pos"]] += 1
+    if any(concept_id not in {candidate["concept_id"] for candidate in c8_kept} for concept_id in demo_ids):
+        raise ValueError("A selected demonstration has no example that passes C1–C8")
+
+    selected_by_id = choose_examples(
+        c8_kept,
+        preferred_min_tokens=int(settings["preferred_example_min_tokens"]),
+    )
+    demo_rows = [
+        {
+            **selected_by_id[concept_id],
+            "vi": rows_by_id[concept_id]["vi_canonical"],
+        }
+        for concept_id in demo_ids
+    ]
+    collapsed_demos = [
+        {"concept_id": concept_id, "vi": rows_by_id[concept_id]["vi_canonical"]}
+        for concept_id in demo_ids
+        if rows_by_id[concept_id].get("collapsed") is True
+    ]
+    if collapsed_demos:
+        raise ValueError(f"Selected cloze demonstration(s) are collapsed; stop per Step 5: {collapsed_demos!r}")
+
+    test_selected = {
+        concept_id: candidate
+        for concept_id, candidate in selected_by_id.items()
+        if concept_id in test_ids
+    }
+    test_cloze_rows = [row for row in test_rows if row["concept_id"] in test_selected]
+    main_rows = [row for row in test_cloze_rows if row["m1_extension"] is False]
+    extension_rows = [row for row in test_cloze_rows if row["m1_extension"] is True]
+    test_cloze_nodiac_rows = []
+    for row in test_cloze_rows:
+        collapsed = row.get("collapsed")
+        if type(collapsed) is not bool:
+            raise ValueError(f"Cloze concept {row['concept_id']!r} lacks boolean collapsed metadata")
+        if not collapsed:
+            test_cloze_nodiac_rows.append(row)
+    main_nodiac_rows = [row for row in test_cloze_nodiac_rows if row["m1_extension"] is False]
+    extension_nodiac_rows = [row for row in test_cloze_nodiac_rows if row["m1_extension"] is True]
+
+    main_by_stratum_total = Counter(row["stratum"] for row in test_rows if row["m1_extension"] is False)
+    main_by_stratum_survived = Counter(row["stratum"] for row in main_rows)
+    extension_by_stratum_total = Counter(row["stratum"] for row in test_rows if row["m1_extension"] is True)
+    extension_by_stratum_survived = Counter(row["stratum"] for row in extension_rows)
+
+    old_path = Path(config["prompts"]["paths"]["output_dir"]) / "cloze_diac_set1.jsonl"
+    old_rows = list(iter_jsonl(old_path))
+    if any(not isinstance(row, dict) or "concept_id" not in row or "prompt" not in row for row in old_rows):
+        raise ValueError(f"Unexpected existing v1.2 cloze record schema in {old_path}")
+    dropped = write_dropped_csv(
+        paths["dropped_csv"], old_rows=old_rows,
+        selected_by_id=test_selected, per_concept_counts=per_concept_counts,
+        answer_label=config["prompts"]["cloze"]["answer_label"],
+    )
+    write_failure_jsonl(paths["candidate_failures"], failures)
+
+    funnel = {
+        scope: [
+            {
+                "stage": stage,
+                "n": funnel_counts.get(stage, {}).get(scope, 0),
+                "n_by_pos": dict(sorted(stage_pos.get(stage, {}).get(scope, Counter()).items())),
+            }
+            for stage in ("candidates", *(f"after_{rule}" for rule in RULES))
+        ]
+        for scope in ("main", "extension")
+    }
+    demo_set_by_id = {
+        row["concept_id"]: set_number
+        for set_number, ids in fewshot_sets.items()
+        for row in ids
+        for _ in [0]
+    }
+    fallback_ids = [concept_id for concept_id in demo_ids if demo_set_by_id.get(concept_id) == int(settings["fallback_fewshot_set"])]
+    sample_pool = sorted(test_selected.values(), key=lambda item: item["concept_id"])
+    sample_n = min(int(settings["survivor_sample_n"]), len(sample_pool))
+    rng = np.random.default_rng(int(config["seed"]))
+    sample = [sample_pool[index] for index in rng.permutation(len(sample_pool)).tolist()[:sample_n]]
+    sample_rows = [
+        {
+            "vi": candidate["vi"],
+            "en": candidate["en"],
+            "en_sense_gloss": candidate["en_sense_gloss"],
+            "query": candidate["query"],
+            "NLLB English": candidate["nllb_english"][0] if candidate["nllb_english"] else "",
+            "m1_extension": candidate["m1_extension"],
+            "stratum": candidate["stratum"],
+        }
+        for candidate in sample
+    ]
+    coverage = {
+        "main": {
+            "n_survived": len(main_rows),
+            "n_test": sum(main_by_stratum_total.values()),
+            "by_stratum": {
+                stratum: {
+                    "n_survived": main_by_stratum_survived.get(stratum, 0),
+                    "n_test": count,
+                    "percent": 100.0 * main_by_stratum_survived.get(stratum, 0) / count if count else None,
+                }
+                for stratum, count in sorted(main_by_stratum_total.items())
+            },
+        },
+        "extension": {
+            "n_survived": len(extension_rows),
+            "n_test": sum(extension_by_stratum_total.values()),
+            "by_stratum": {
+                stratum: {
+                    "n_survived": extension_by_stratum_survived.get(stratum, 0),
+                    "n_test": count,
+                    "percent": 100.0 * extension_by_stratum_survived.get(stratum, 0) / count if count else None,
+                }
+                for stratum, count in sorted(extension_by_stratum_total.items())
+            },
+        },
+        "main_sino_percent": 100.0 * main_by_stratum_survived.get("sino", 0) / main_by_stratum_total["sino"] if main_by_stratum_total["sino"] else None,
+        "main_nonsino_percent": 100.0 * main_by_stratum_survived.get("nonsino", 0) / main_by_stratum_total["nonsino"] if main_by_stratum_total["nonsino"] else None,
+    }
+    for candidate in example_candidates:
+        # Any concept without examples is represented in the C1 funnel as zero; concept drop rows retain C1 attribution.
+        per_concept_counts.setdefault(candidate["concept_id"], {})
+
+    report = {
+        "schema_version": 1,
+        "rules": list(RULES),
+        "candidate_funnel": funnel,
+        "final_counts": {
+            "main": len(main_rows),
+            "extension": len(extension_rows),
+            "diac_records": len(test_cloze_rows),
+            "nodiac_records": len(test_cloze_nodiac_rows),
+            "main_nodiac_records": len(main_nodiac_rows),
+            "extension_nodiac_records": len(extension_nodiac_rows),
+            "nonsino_subset": sum(row["stratum"] == "nonsino" for row in [*main_rows, *extension_rows]),
+            "by_stratum": {
+                "main": dict(sorted(main_by_stratum_survived.items())),
+                "extension": dict(sorted(extension_by_stratum_survived.items())),
+            },
+        },
+        "coverage": coverage,
+        "demo_concept_ids": demo_ids,
+        "demo_count_required": int(settings["demo_count"]),
+        "demo_count_available": len(demo_ids),
+        "demo_fallback_ids_from_set_2": fallback_ids,
+        "candidate_failure_records": len(failures),
+        "dropped_old_concepts": len(dropped),
+        "nllb": {
+            **nllb_stats,
+            "calls_delta": int(getattr(translator, "translation_calls", 0)) - before_calls,
+            "cache_hits_delta": int(getattr(translator, "cache_hits", 0)) - before_hits,
+            "model": step07_config["model"],
+            "revision": step07_config["revision"],
+            "num_beams": step07_config["num_beams"],
+            "num_return": step07_config["num_return"],
+        },
+        "semantic_rule": "any configured return beam contains a lemmatized exact lemma/head lemma or WordNet synonym",
+        "survivor_sample_seed": int(config["seed"]),
+        "survivor_sample": sample_rows,
+        "minimum_main_survivors_to_write": int(settings["minimum_main_survivors_to_write"]),
+        "minimum_main_survivors_met": len(main_rows) >= int(settings["minimum_main_survivors_to_write"]),
+    }
+
+    audit_path = Path(paths["audit_report"])
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    audit_temp = audit_path.with_name(f".{audit_path.name}.tmp")
+    audit_temp.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    audit_temp.replace(audit_path)
+
+    for scope, stages in funnel.items():
+        logger.info("Cloze v1.3 candidate funnel %s: %s", scope, json.dumps(stages, sort_keys=True))
+    logger.info("Cloze v1.3 final coverage: %s", json.dumps(coverage, sort_keys=True))
+    logger.info("Cloze v1.3 demonstrations: %s; fallback from set 2=%s", demo_ids, fallback_ids)
+    logger.info("Cloze v1.3 candidate failures=%d; old concepts dropped=%d; NLLB stats=%s",
+                len(failures), len(dropped), json.dumps(report["nllb"], sort_keys=True))
+
+    demo_concept_ids = list(demo_ids)
+    demo_cloze_rows = [
+        {"sentence": candidate["query"], "answer": rows_by_id[concept_id]["vi_canonical"]}
+        for concept_id, candidate in zip(demo_ids, [selected_by_id[concept_id] for concept_id in demo_ids])
+    ]
+    diac_records: list[dict[str, Any]] = []
+    nodiac_records: list[dict[str, Any]] = []
+    answer_label = config["prompts"]["cloze"]["answer_label"]
+    primary_set = int(config["prompts"]["fewshot"]["primary_set"])
+    insufficient_demos = len(demo_ids) < int(settings["demo_count"])
+    for row in ([] if insufficient_demos else test_cloze_rows):
+        candidate = test_selected[row["concept_id"]]
+        vi_text = row["vi_canonical"]
+        prompt = render_prompt(demo_cloze_rows, query=candidate["query"], answer_label=answer_label)
+        diac_records.append(build_record(
+            row, prompt=prompt, condition="diac", fewshot_set=primary_set,
+            vi_target=vi_text, demo_concept_ids=demo_concept_ids,
+        ))
+        if not row["collapsed"]:
+            nodiac_demo_rows = [
+                {
+                    "query": strip_diacritics(item["sentence"], preserve_case=True),
+                    "vi": strip_diacritics(item["answer"], preserve_case=True),
+                }
+                for item in demo_cloze_rows
+            ]
+            nodiac_query = strip_diacritics(candidate["query"], preserve_case=True)
+            nodiac_prompt = render_prompt(nodiac_demo_rows, query=nodiac_query, answer_label=strip_diacritics(answer_label, preserve_case=True))
+            nodiac_records.append(build_record(
+                row, prompt=nodiac_prompt, condition="nodiac", fewshot_set=primary_set,
+                vi_target=strip_diacritics(vi_text, preserve_case=True),
+                demo_concept_ids=demo_concept_ids,
+            ))
+
+    if not insufficient_demos:
+        verify_records(
+            {"diac": diac_records, "nodiac": nodiac_records},
+            rows_by_id=rows_by_id,
+            demo_concept_ids=demo_concept_ids,
+            answer_label=answer_label,
+            primary_set=primary_set,
+        )
+
+    return {
+        "records": {"diac": diac_records, "nodiac": nodiac_records},
+        "demo_concept_ids": demo_concept_ids,
+        "demo_cloze_rows": demo_cloze_rows,
+        "test_cloze_rows": test_cloze_rows,
+        "test_nodiac_rows": test_cloze_nodiac_rows,
+        "masked_by_id": {row["concept_id"]: test_selected.get(row["concept_id"], {}).get("query") for row in test_rows},
+        "report": report,
+        "stage_pos": stage_pos,
+        "c8_pos": stage_pos["after_C8"],
+        "c8_input_by_scope": _stage_counts(c8_input),
+        "funnel_counts": funnel_counts,
+        "per_concept_counts": per_concept_counts,
+        "failure_count": len(failures),
+        "main_survivors": len(main_rows),
+        "dropped_old_concepts": len(dropped),
+        "old_query_count": len(old_rows),
+        "demo_fallback_ids": fallback_ids,
+        "stop_reason": "insufficient_cloze_demonstrations" if insufficient_demos else None,
+    }
+
+
+def record_candidate_dropflow(flow: Any, result: dict[str, Any]) -> None:
+    """Append candidate-level C1–C8 dropflow counts for main and extension rows."""
+    counts = result["funnel_counts"]
+    stage_pos = result["stage_pos"]
+    for scope in ("main", "extension"):
+        previous_stage = "candidates"
+        for rule in RULES:
+            current_stage = f"after_{rule}"
+            n_in = counts.get(previous_stage, {}).get(scope, 0)
+            n_out = counts.get(current_stage, {}).get(scope, 0)
+            by_pos = dict(sorted(stage_pos.get(current_stage, {}).get(scope, Counter()).items()))
+            flow.record(
+                step="12", stage=f"cloze_v13_{rule}_{scope}", unit="items",
+                n_in=n_in, n_out=n_out, n_out_by_pos=by_pos,
+            )
+            previous_stage = current_stage

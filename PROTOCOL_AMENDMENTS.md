@@ -104,3 +104,32 @@ v1.2 (2026-09-26; pre-data; no model outputs exist at the time of this amendment
   Reason: the pre-model data analysis found sino vs nonsino imbalance of
   d = +0.89 (Vietnamese frequency), +0.83 (Chinese frequency), −0.83
   (concreteness), −0.62 (Vietnamese tokens).
+
+### v1.3 cloze prompt correction (2026-09-27; before any study-LLM run)
+
+- Cloze examples are restricted to the Vietnamese Wiktionary sense whose
+  English gloss matches the aligned English lemma using the existing
+  `in_vi_gloss` whole-word rule; when no sense matches, only single-sense
+  entries are eligible (C1). Examples are NFC-normalized, whitespace-cleaned
+  to one line (C2), and must contain the canonical Vietnamese form exactly
+  once, case-insensitively, on syllable boundaries (C3). Queries require at
+  least six whitespace tokens including the blank (C4), exclude `()[]/|~`
+  (C5), and are rejected when the blank with adjacent syllables forms another
+  Vietnamese Wiktextract headword (C6). A filled query must translate through
+  the pinned NLLB-200 distilled-600M decode and match a spaCy lemma, the head
+  lemma for a two-word English lemma, or a WordNet synonym (C7). Candidate
+  queries shared by distinct concepts are removed (C8). Example selection is
+  deterministic: shortest with at least eight tokens, otherwise longest,
+  with string-order tie-breaking.
+- Cloze demonstrations are selected from few-shot set 1, preferring the
+  existing `nghiên cứu` and `bạo lực` concepts; set 2 is the seeded fallback.
+  Nodiac cloze excludes collapsed forms and strips diacritics from all
+  Vietnamese prompt text and the Vietnamese target.
+- The v1.2 audit was reproduced (337 records: 265 main and 72 extension;
+  239 queries of four or fewer tokens, median 3; 11 repeated query strings
+  across 30 concepts; four multiline, five unblanked-target, and four
+  parenthesized queries; demo 3 was `console thuộc ___ thứ 3`). The v1.3
+  candidate audit yielded 61/1,535 main and 5/123 extension candidates, below
+  the pre-set 100-main-item decision threshold; only one of three required
+  demonstrations qualified after checking set 2. The v1.2 prompt files remain
+  in place pending the human decision on whether to retain cloze.

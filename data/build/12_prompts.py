@@ -22,8 +22,10 @@ from wordfreq import zipf_frequency
 
 try:
     from common import DropflowLogger, iter_jsonl, load_config, norm_ru, normalize_nfc, normalize_strings, ru_stress_free, setup_logging, strip_diacritics, vi_orth_key
+    from cloze_v13 import build_cloze_v13, record_candidate_dropflow
 except ModuleNotFoundError:
     from data.build.common import DropflowLogger, iter_jsonl, load_config, norm_ru, normalize_nfc, normalize_strings, ru_stress_free, setup_logging, strip_diacritics, vi_orth_key
+    from data.build.cloze_v13 import build_cloze_v13, record_candidate_dropflow
 
 
 STEP = "12_prompts"
@@ -623,22 +625,57 @@ def run(config_path: str | Path) -> dict[str, Any]:
         for row in group:
             logger.info("%d | %s | %s | %s | %s", set_number, row["en_lemma"], row["vi_canonical"], row["ru_canonical"], row["stratum"])
 
-    # Cache only in-scope Vietnamese entries needed for test cloze targets and selected examples.
-    step08 = _load_step_module("08_etymology.py")
-    cjk_ranges = config["inspection"]["cjk_ranges"]
-    requested_keys = {vi_orth_key(row["vi_canonical"]) for row in [*test_rows, *selected]}
-    entries_by_key, _ = step08._read_canonical_entries(
-        Path(config["etymology"]["paths"]["vietnamese_dump"]),
-        requested_keys, cjk_ranges, logger, int(config["logging"]["progress_every"]),
-    )
-    max_syllables = int(settings["cloze"]["max_syllables"])
-    masked_by_id: dict[str, str | None] = {}
-    for row in [*test_rows, *selected]:
-        entries, _scope = step08._scope_entries(entries_by_key[vi_orth_key(row["vi_canonical"])], row["pos"])
-        masked_by_id[row["concept_id"]] = _entry_cloze_sentence(entries, row["vi_canonical"], max_syllables=max_syllables)
-
+    # Rebuild v1.3 cloze candidates under the ordered C1–C8 rules.
     cloze_k = int(settings["cloze"]["k"])
-    fewshot_cloze = select_cloze_demonstrations(selected, masked_by_id, k=cloze_k)
+    cloze_v13_settings = settings["cloze_v13"]
+    if cloze_k != int(cloze_v13_settings["demo_count"]):
+        raise ValueError(
+            f"prompts.cloze.k={cloze_k} must match prompts.cloze_v13.demo_count="
+            f"{cloze_v13_settings['demo_count']}"
+        )
+    step08 = _load_step_module("08_etymology.py")
+    step04 = _load_step_module("04_attest.py")
+    cloze_result = build_cloze_v13(
+        all_rows=all_rows,
+        test_rows=test_rows,
+        fewshot_sets=fewshot_sets,
+        config=config,
+        translator=translator,
+        step07=step07,
+        step08=step08,
+        attest_matcher=step04.contains_whole_word,
+        logger=logger,
+    )
+    masked_by_id = cloze_result["masked_by_id"]
+    test_cloze_rows = cloze_result["test_cloze_rows"]
+    test_cloze_nodiac_rows = cloze_result["test_nodiac_rows"]
+    main_cloze_rows = [row for row in main_test_rows if masked_by_id.get(row["concept_id"]) is not None]
+    demo_concept_ids = cloze_result["demo_concept_ids"]
+    minimum_main_survivors = int(cloze_v13_settings["minimum_main_survivors_to_write"])
+    if cloze_result["stop_reason"] or cloze_result["main_survivors"] < minimum_main_survivors:
+        if cloze_result["stop_reason"]:
+            logger.error(
+                "Cloze v1.3 cannot render prompts: selected %d/%d demonstrations after set-2 fallback; "
+                "leaving prompt files untouched",
+                cloze_result["report"]["demo_count_available"], cloze_result["report"]["demo_count_required"],
+            )
+        if cloze_result["main_survivors"] < minimum_main_survivors:
+            logger.error(
+                "Cloze v1.3 decision point: main survivors=%d below configured minimum=%d; "
+                "leaving prompt files untouched and stopping for human decision",
+                cloze_result["main_survivors"], minimum_main_survivors,
+            )
+        runtime = time.monotonic() - started
+        logger.info("Runtime seconds: %.3f", runtime)
+        return {
+            "status": cloze_result["stop_reason"] or "below_minimum_main_survivors",
+            "main_survivors": cloze_result["main_survivors"],
+            "minimum_main_survivors": minimum_main_survivors,
+            "demos_available": cloze_result["report"]["demo_count_available"],
+            "demos_required": cloze_result["report"]["demo_count_required"],
+            "cloze_report_path": cloze_v13_settings["paths"]["audit_report"],
+            "runtime_seconds": runtime,
+        }
 
     labels = settings["label"]
     translation_k = int(settings["translation"]["k"])
@@ -687,25 +724,8 @@ def run(config_path: str | Path) -> dict[str, Any]:
             if translation_records:
                 sample_prompts[("translation", condition)] = translation_records[0]["prompt"]
 
-    answer_label = settings["cloze"]["answer_label"]
-    for condition, selected_targets in (("diac", test_cloze_rows), ("nodiac", test_cloze_nodiac_rows)):
-        records = []
-        for row in selected_targets:
-            sentence = mask_canonical_occurrence(masked_by_id[row["concept_id"]], row["vi_canonical"])
-            if sentence is None:
-                raise AssertionError(f"Cached cloze sentence no longer contains {row['concept_id']!r}")
-            vi_text = row["vi_canonical"] if condition == "diac" else strip_diacritics(row["vi_canonical"], preserve_case=True)
-            if condition == "nodiac":
-                examples_for_prompt, sentence, answer_label_for_prompt = nodiac_cloze_parts(
-                    fewshot_cloze, sentence=sentence, answer_label=answer_label,
-                )
-            else:
-                examples_for_prompt, answer_label_for_prompt = fewshot_cloze, answer_label
-            prompt = render_cloze_prompt(
-                examples_for_prompt, sentence=sentence, answer_label=answer_label_for_prompt, k=cloze_k,
-            )
-            records.append(_prompt_record(row, prompt=prompt, format_name="cloze", condition=condition,
-                                          fewshot_set=primary_set, vi_target=vi_text))
+    for condition in ("diac", "nodiac"):
+        records = cloze_result["records"][condition]
         file_rows[f"cloze_{condition}_set{primary_set}.jsonl"] = records
         if records:
             sample_prompts[("cloze", condition)] = records[0]["prompt"]
@@ -741,10 +761,8 @@ def run(config_path: str | Path) -> dict[str, Any]:
             "Configured prompts.cloze.cloze_status does not match the main-test result: "
             f"configured={configured_cloze_role!r}, computed={cloze_role!r}"
         )
-    cloze_demo_ids = [row["concept_id"] for row in selected
-                      if masked_by_id.get(row["concept_id"]) is not None][:cloze_k]
     metadata = build_fewshot_metadata(
-        fewshot_sets, cloze_demonstration_ids=cloze_demo_ids, test_rows=test_rows,
+        fewshot_sets, cloze_demonstration_ids=demo_concept_ids, test_rows=test_rows,
         main_test_rows=main_test_rows, masked_by_id=masked_by_id, cloze_status=cloze_role,
     )
     _atomic_write_json(metadata, paths["fewshot_metadata"])
@@ -766,6 +784,7 @@ def run(config_path: str | Path) -> dict[str, Any]:
         by_pos = Counter(row["pos"] for row in rows)
         flow.record(step="12", stage=stage, unit="concepts", n_in=n_in, n_out=n_out,
                     n_out_by_pos=dict(sorted(by_pos.items())))
+    record_candidate_dropflow(flow, cloze_result)
 
     runtime = time.monotonic() - started
     logger.info("Output RU intermediate: %s (%d concepts)", paths["ru_output"], len(ru_rows))
