@@ -340,6 +340,7 @@ def _failure(candidate: dict[str, Any], rule: str, reason: str) -> dict[str, Any
         "nllb_limit_hits": candidate.get("nllb_limit_hits", []),
         "c7_match_type": candidate.get("c7_match_type"),
         "c7_match_word": candidate.get("c7_match_word"),
+        "c7_beam_match_count": candidate.get("c7_beam_match_count", 0),
         "c8_conflicts": candidate.get("c8_conflicts", []),
     }
 
@@ -409,19 +410,32 @@ def match_c7_output(output_lemmas: tuple[str, ...], targets: list[dict[str, Any]
     return None
 
 
-def match_untruncated_c7_beams(
+def c7_beam_match_results(
     output_lemmas: list[tuple[str, ...]], limit_hits: list[bool], targets: list[dict[str, Any]],
-) -> dict[str, str] | None:
-    """Match only outputs that did not consume the full NLLB generation budget."""
+) -> list[dict[str, str] | None]:
+    """Return an allowed C7 match for each output, excluding token-limit hits."""
     if len(output_lemmas) != len(limit_hits):
         raise ValueError("C7 output lemmas and token-limit flags must have equal lengths")
-    for lemmas, reached_limit in zip(output_lemmas, limit_hits, strict=True):
-        if reached_limit:
-            continue
-        match = match_c7_output(lemmas, targets)
-        if match is not None:
-            return match
-    return None
+    return [
+        None if reached_limit else match_c7_output(lemmas, targets)
+        for lemmas, reached_limit in zip(output_lemmas, limit_hits, strict=True)
+    ]
+
+
+def match_untruncated_c7_beams(
+    output_lemmas: list[tuple[str, ...]],
+    limit_hits: list[bool],
+    targets: list[dict[str, Any]],
+    *,
+    minimum_matches: int,
+) -> dict[str, str] | None:
+    """Require a top-beam match plus minimum agreement across untruncated beams."""
+    if minimum_matches < 1:
+        raise ValueError("C7 minimum beam matches must be positive")
+    matches = c7_beam_match_results(output_lemmas, limit_hits, targets)
+    if not matches or matches[0] is None or sum(match is not None for match in matches) < minimum_matches:
+        return None
+    return matches[0]
 
 
 def recheck_point_sample(
@@ -432,7 +446,8 @@ def recheck_point_sample(
     wordnet_reader: Any,
     source_code: str,
     target_code: str,
-    use_all_returned_beams: bool,
+    minimum_beam_matches: int,
+    expected_beam_count: int,
 ) -> dict[str, Any]:
     """Independently re-evaluate the legacy #4 point example under C7's output rule."""
     matches = [candidate for candidate in candidates if candidate["vi"] == "chỉ" and candidate["en"] == "point"]
@@ -454,11 +469,18 @@ def recheck_point_sample(
     filled = text[:start] + candidate["vi"] + text[end:]
     request = (source_code, target_code, filled)
     details = translator.translate_many_with_limit_hits([request])[request]
+    if len(details["outputs"]) != expected_beam_count or len(details["limit_hits"]) != expected_beam_count:
+        raise ValueError(
+            f"C7 expected {expected_beam_count} return beams for point diagnostic; "
+            f"got {len(details['outputs'])} outputs and {len(details['limit_hits'])} limit flags"
+        )
     output_lemmas = [lemma_tokens(doc) for doc in nlp.pipe(details["outputs"], batch_size=32)]
     targets = english_match_targets("point", pos=candidate["pos"], nlp=nlp, wordnet_reader=wordnet_reader)
-    beam_count = len(details["outputs"]) if use_all_returned_beams else min(1, len(details["outputs"]))
+    beam_count = len(details["outputs"])
+    matches = c7_beam_match_results(output_lemmas, details["limit_hits"], targets)
     match = match_untruncated_c7_beams(
-        output_lemmas[:beam_count], details["limit_hits"][:beam_count], targets,
+        output_lemmas, details["limit_hits"], targets,
+        minimum_matches=minimum_beam_matches,
     )
     return {
         "status": "evaluated",
@@ -466,9 +488,10 @@ def recheck_point_sample(
         "NLLB English": details["outputs"],
         "NLLB limit hits": details["limit_hits"],
         "evaluated_beam_count": beam_count,
+        "C7 matching beam count": sum(item is not None for item in matches),
         "C7 matched type": match["type"] if match else None,
         "C7 matched word": match["word"] if match else None,
-        "passes_C7_only_if_contains_point": match is not None and match["word"].casefold() == "point",
+        "passes_C7_beam_agreement": match is not None and match["word"].casefold() == "point",
     }
 
 
@@ -480,7 +503,8 @@ def filter_cloze_candidates_c1_to_c7(
     min_query_tokens: int,
     min_occurrences: int,
     max_occurrences: int,
-    use_all_returned_beams: bool,
+    minimum_beam_matches: int,
+    expected_beam_count: int,
     spacy_batch_size: int,
     translator: Any,
     nlp: Any,
@@ -609,13 +633,20 @@ def filter_cloze_candidates_c1_to_c7(
         detail = detailed_translations[key]
         outputs = detail["outputs"]
         limit_hits = detail["limit_hits"]
+        if len(outputs) != expected_beam_count or len(limit_hits) != expected_beam_count:
+            raise ValueError(
+                f"C7 expected {expected_beam_count} return beams for {candidate['candidate_id']}; "
+                f"got {len(outputs)} outputs and {len(limit_hits)} limit flags"
+            )
         candidate["nllb_english"] = outputs
         candidate["nllb_limit_hits"] = limit_hits
-        beam_indexes = range(len(outputs)) if use_all_returned_beams else range(min(1, len(outputs)))
-        selected_lemmas = [output_lemmas[outputs[index]] for index in beam_indexes]
-        selected_limit_hits = [limit_hits[index] for index in beam_indexes]
+        selected_lemmas = [output_lemmas[output] for output in outputs]
+        beam_matches = c7_beam_match_results(selected_lemmas, limit_hits, targets_by_candidate[candidate["candidate_id"]])
+        beam_match_count = sum(match is not None for match in beam_matches)
+        candidate["c7_beam_match_count"] = beam_match_count
         matched = match_untruncated_c7_beams(
-            selected_lemmas, selected_limit_hits, targets_by_candidate[candidate["candidate_id"]],
+            selected_lemmas, limit_hits, targets_by_candidate[candidate["candidate_id"]],
+            minimum_matches=minimum_beam_matches,
         )
         if matched is not None:
             candidate["c7_match_type"] = matched["type"]
@@ -627,8 +658,10 @@ def filter_cloze_candidates_c1_to_c7(
             untruncated = sum(not value for value in limit_hits)
             failures.append(_failure(
                 candidate, "C7",
-                "no untruncated configured NLLB beam contains the exact English lemma, two-word head lemma, or same-POS WordNet synset lemma "
-                f"(untruncated beams={untruncated}; token-limit hits={sum(limit_hits)})",
+                "C7 requires a matching untruncated top beam and at least "
+                f"{minimum_beam_matches} matching untruncated return beams "
+                f"(matching beams={beam_match_count}/{len(outputs)}; "
+                f"untruncated beams={untruncated}; token-limit hits={sum(limit_hits)})",
             ))
     current = semantic_survivors
     counts["after_C7"] = _stage_counts(current)
@@ -1061,7 +1094,8 @@ def build_cloze_v13(
         wordnet_reader=wordnet_reader,
         source_code=source_code,
         target_code=target_code,
-        use_all_returned_beams=bool(settings["semantic_use_all_returned_beams"]),
+        minimum_beam_matches=int(settings["semantic_min_beam_matches"]),
+        expected_beam_count=int(step07_config["num_return"]),
     )
     before_calls = int(getattr(translator, "translation_calls", 0))
     before_hits = int(getattr(translator, "cache_hits", 0))
@@ -1072,7 +1106,8 @@ def build_cloze_v13(
         min_query_tokens=int(settings["min_query_tokens"]),
         min_occurrences=int(settings["min_canonical_occurrences"]),
         max_occurrences=int(settings["max_canonical_occurrences"]),
-        use_all_returned_beams=bool(settings["semantic_use_all_returned_beams"]),
+        minimum_beam_matches=int(settings["semantic_min_beam_matches"]),
+        expected_beam_count=int(step07_config["num_return"]),
         spacy_batch_size=int(settings["spacy_batch_size"]),
         translator=translator,
         nlp=nlp,
@@ -1232,6 +1267,7 @@ def build_cloze_v13(
             "NLLB limit hits": candidate["nllb_limit_hits"],
             "C7 matched type": candidate["c7_match_type"],
             "C7 matched word": candidate["c7_match_word"],
+            "C7 matching beam count": candidate["c7_beam_match_count"],
             "m1_extension": candidate["m1_extension"],
             "stratum": candidate["stratum"],
         }
@@ -1247,6 +1283,7 @@ def build_cloze_v13(
             "NLLB English": candidate["nllb_english"],
             "C7 matched type": candidate["c7_match_type"],
             "C7 matched word": candidate["c7_match_word"],
+            "C7 matching beam count": candidate["c7_beam_match_count"],
             "m1_extension": candidate["m1_extension"],
             "stratum": candidate["stratum"],
         }
@@ -1325,7 +1362,15 @@ def build_cloze_v13(
             "num_return": step07_config["num_return"],
             "max_new_tokens": int(getattr(translator, "max_new_tokens", step07_config["max_new_tokens"])),
         },
-        "semantic_rule": "top beam only: the untruncated top NLLB beam contains a lemmatized target lemma, two-word head lemma, or same-POS WordNet synset lemma",
+        "semantic_rule": (
+            "the untruncated top beam must match, and at least "
+            f"{int(settings['semantic_min_beam_matches'])} of "
+            f"{int(step07_config['num_return'])} return beams must match; "
+            "each match uses the target lemma, permitted two-word head lemma, "
+            "or same-POS WordNet synset lemma"
+        ),
+        "semantic_min_beam_matches": int(settings["semantic_min_beam_matches"]),
+        "semantic_expected_beam_count": int(step07_config["num_return"]),
         "survivor_sample_seed": int(config["seed"]),
         "survivor_sample": sample_rows,
         "surviving_test_items": surviving_test_items,

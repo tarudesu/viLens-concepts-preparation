@@ -164,7 +164,7 @@ def test_named_rebuild_sample_defects_have_strict_rule_guards() -> None:
             english, pos="noun", nlp=_NLP(), wordnet_reader=type("EmptyWN", (), {"synsets": lambda *_args, **_kwargs: []})(),
         )
         assert cloze_v13.match_c7_output(("a", "building"), targets) is None
-    # #4 chỉ can pass only through an untruncated output containing point.
+    # #4 chỉ can pass only when the untruncated top beam contains point.
     point_targets = cloze_v13.english_match_targets(
         "point", pos="noun", nlp=_NLP(), wordnet_reader=type("EmptyWN", (), {"synsets": lambda *_args, **_kwargs: []})(),
     )
@@ -174,10 +174,31 @@ def test_named_rebuild_sample_defects_have_strict_rule_guards() -> None:
     assert cloze_v13.match_c7_output(("shower",), point_targets) is None
     assert cloze_v13.match_untruncated_c7_beams(
         [("point",), ("shower",)], [True, False], point_targets,
+        minimum_matches=1,
     ) is None
     assert cloze_v13.match_untruncated_c7_beams(
         [("point",), ("shower",)], [False, False], point_targets,
+        minimum_matches=1,
     ) == {"type": "target_lemma", "word": "point"}
+
+
+def test_c7_requires_top_match_and_three_of_five_beams() -> None:
+    targets = [{"type": "target_lemma", "word": "goal", "sequence": ("goal",)}]
+    agreed = [("goal",), ("goal",), ("goal",), ("shot",), ("target",)]
+    assert cloze_v13.match_untruncated_c7_beams(
+        agreed, [False] * 5, targets, minimum_matches=3,
+    ) == {"type": "target_lemma", "word": "goal"}
+    assert cloze_v13.match_untruncated_c7_beams(
+        [("shot",), ("goal",), ("goal",), ("goal",), ("target",)],
+        [False] * 5, targets, minimum_matches=3,
+    ) is None
+    assert cloze_v13.match_untruncated_c7_beams(
+        [("goal",), ("goal",), ("shot",), ("shot",), ("target",)],
+        [False] * 5, targets, minimum_matches=3,
+    ) is None
+    assert cloze_v13.match_untruncated_c7_beams(
+        agreed, [False, False, True, False, False], targets, minimum_matches=3,
+    ) is None
 
 
 def test_c8_removes_shared_queries_and_old_query_extraction_handles_multiline() -> None:

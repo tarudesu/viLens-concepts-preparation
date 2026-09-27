@@ -358,7 +358,7 @@ prompts:
     maximum_extension_survivors: 7 # Accepted bound after the untruncated top-beam rerun admitted three concepts.
     nllb_max_new_tokens: 256 # C7 flags and excludes every beam that consumes this full budget.
     forbidden_characters: ["(", ")", "[", "]", "/", "|", "~"]
-    semantic_use_all_returned_beams: false # C7 uses the top beam only; outputs that hit the token limit never count.
+    semantic_min_beam_matches: 3 # C7 also requires at least 3 of the 5 returned beams to match.
     spacy_batch_size: 128
     survivor_sample_n: 25
     paths:

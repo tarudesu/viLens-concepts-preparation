@@ -107,7 +107,7 @@ v1.2 (2026-09-26; pre-data; no model outputs exist at the time of this amendment
 
 ### v1.3 cloze rebuild (2026-09-27; before any study-LLM run)
 
-- **Decision:** v1.3 keeps the rebuilt cloze files as supplementary,
+- **Decision:** v1.3 includes the rebuilt cloze files as supplementary,
   descriptive data, before any study-LLM run. The v1.2 cloze files remain at
   tag `v1.2` for provenance and are not used by any analysis.
 - **Evidence from the v1.2 audit:** 239 of 337 queries have four or fewer
@@ -136,11 +136,18 @@ v1.2 (2026-09-26; pre-data; no model outputs exist at the time of this amendment
   C4 counts letter-bearing tokens plus the blank and requires six. C5b rejects
   letter-bearing non-Vietnamese query tokens. C6 searches contiguous
   headword windows containing the fill and at least one neighbouring
-  syllable, up to the longest headword. C7 rejects token-limit hits and checks
-  the untruncated top beam only for the target lemma, the permitted two-word
-  head lemma, or a same-POS WordNet lemma. The truncation fix re-admitted
-  `tỉnh` (`3f42cf2315a1`), `gián` (`7d62efb774af`), and `tịch thu`
-  (`a734dc647ae3`).
+  syllable, up to the longest headword. C7 excludes token-limit hits and
+  requires both a match on the untruncated top beam and a match on at least
+  three of the five returned beams, using the target lemma, permitted
+  two-word head lemma, or a same-POS WordNet lemma. The truncation fix
+  re-admitted `tỉnh` (`3f42cf2315a1`), `gián` (`7d62efb774af`), and
+  `tịch thu` (`a734dc647ae3`).
+- **Beam-agreement correction:** `mục tiêu` (`fec047a4ea9f`, English `goal`)
+  had passed on its top output, “The chessmen missed the first goal,” while
+  the other four outputs said “shot” or “target.” The sentence uses the
+  physical-target sense, so the candidate fails the three-of-five agreement
+  rule (one of five beams matches). After this correction, C1–C8 plus beam
+  agreement are frozen for v1.3.
 - **C8 context rule:** C8 is displayed last in the funnel but is computed
   against all candidates that pass C3 with a valid blank, before C4–C7. It
   rejects identical queries with different Vietnamese fills; identical
@@ -159,16 +166,16 @@ v1.2 (2026-09-26; pre-data; no model outputs exist at the time of this amendment
   | After C4 | 67 | 9 |
   | After C5 | 59 | 9 |
   | After C6 | 58 | 9 |
-  | After C7 | 38 | 7 |
-  | After C8 | 37 | 7 |
+  | After C7 | 36 | 7 |
+  | After C8 | 35 | 7 |
 
-- **Final concept counts and coverage:** the diac files contain 35 main and
-  seven extension concepts (42 total); the nodiac files contain 30 main and
-  no extension concepts. Main coverage is 35/1,535 (2.28%), with 18/481
-  sino (3.74%) and 10/706 nonsino (1.42%); the remaining seven main concepts
-  are ambiguous. Diac counts by stratum are main: 18 sino, 10 nonsino, 7
+- **Final concept counts and coverage:** the diac files contain 34 main and
+  seven extension concepts (41 total); the nodiac files contain 29 main and
+  no extension concepts. Main coverage is 34/1,535 (2.21%), with 17/481
+  sino (3.53%) and 10/706 nonsino (1.42%); the remaining seven main concepts
+  are ambiguous. Diac counts by stratum are main: 17 sino, 10 nonsino, 7
   ambiguous; extension: 2 sino, 3 nonsino, 2 ambiguous. Nodiac counts are
-  main: 16 sino, 8 nonsino, 6 ambiguous; extension: zero in each stratum.
+  main: 15 sino, 8 nonsino, 6 ambiguous; extension: zero in each stratum.
 - **Demonstrations:** `1a9ec27bf14d` from few-shot set 1, query
   `___ không giải quyết được gì cả.` / answer `bạo lực`; `8fa44725013f` from
   few-shot set 5, query `Mới mưa xong nền ___, coi chừng té.` / answer `ướt`;
